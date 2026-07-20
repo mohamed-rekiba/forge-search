@@ -32,6 +32,11 @@ from .core.server import DEFAULT_SERVER_NAME, ForgeSearch
 
 __all__ = ["main"]
 
+#: The most recent root resolution, so `serve` can surface it through MCP
+#: metadata instead of stderr. A module-level slot rather than a return-value
+#: change because every caller wants the roots and only one wants the summary.
+_LAST_RESOLUTION: dict[str, object] = {}
+
 #: The VS Code variable clients disagree about. Tolerated, never recommended.
 _VSCODE_WORKSPACE = "${workspaceFolder}"
 
@@ -56,7 +61,7 @@ def _providers() -> list[RootProvider]:
     return found
 
 
-def _resolve_roots(args: argparse.Namespace) -> list[Root]:
+def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
     """Roots are always explicit — there is no discovery.
 
     An absolute path, or `${workspaceFolder}` — which several MCP clients pass
@@ -120,9 +125,22 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:
         adapters=_providers(),
         adapter_name=getattr(args, "adapter", None),
     )
-    # Always report the resolved set. An adapter that expands one root into
-    # several is doing something the caller did not literally ask for, so it
-    # says so rather than quietly searching more than was requested.
+    # The resolved set matters — a wrong root means every later search returns
+    # plausible results from the wrong tree — but WHERE it is reported depends
+    # on the transport.
+    #
+    # On stdio, stdout is the JSON-RPC channel, so the only place to write is
+    # stderr, and MCP clients render every stderr line as a `[warning]`. A
+    # permanent false warning on every launch is worse than useless: it trains
+    # the operator to ignore the log, so a real warning gets ignored too.
+    # `serve` therefore reports through MCP metadata instead (see
+    # ForgeSearch.build), and stays silent here.
+    #
+    # Every other subcommand is an ordinary CLI run where stderr is just
+    # stderr, and the line is printed.
+    _LAST_RESOLUTION["value"] = resolution
+    if getattr(args, "quiet_roots", False) and not getattr(args, "verbose", False):
+        return list(resolution.roots)
     print(f"forge-search: {resolution.describe()}", file=sys.stderr)
     return list(resolution.roots)
 
@@ -240,13 +258,16 @@ def _cmd_bench(args: argparse.Namespace) -> int:
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
+    args.quiet_roots = True
     roots = _resolve_roots(args)
+    resolution = _LAST_RESOLUTION.get("value")
     search = ForgeSearch(
         roots=roots,
         server_name=args.name,
         embedder=_embedder(args),
         reranker=_reranker(args),
         index_dir=args.index_dir,
+        summary=resolution.describe() if resolution else None,
     )
     try:
         search.run(transport=args.transport)
@@ -311,7 +332,7 @@ def _index_dir_flag(parser: argparse.ArgumentParser) -> None:
         "--index-dir",
         help=(
             "Store indexes here instead of the OS cache dir. Relative paths "
-            "are per-root (e.g. --index-dir .forge-search). Gitignore it."
+            "are per-root (e.g. --index-dir .forge_search). Gitignore it."
         ),
     )
 
@@ -340,6 +361,14 @@ def main(argv: list[str] | None = None) -> int:
     serve = sub.add_parser("serve", help="Run the MCP server")
     _add_root_args(serve)
     serve.add_argument("--name", default=DEFAULT_SERVER_NAME, help="MCP server name")
+    serve.add_argument(
+        "--verbose",
+        action="store_true",
+        help=(
+            "Print the resolved roots to stderr at startup. Off by default "
+            "because MCP clients render every stderr line as a warning."
+        ),
+    )
     serve.add_argument(
         "--transport",
         default="stdio",

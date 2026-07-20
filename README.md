@@ -105,17 +105,23 @@ directory**. For a stdio MCP server that is the project root in practice —
 verified against a live Claude Code server — but Claude Code's docs explicitly
 tell servers not to depend on cwd and do not guarantee it.
 
-So it is a fallback, not a recommendation. The resolved root is always printed
-at startup:
+So it is a fallback, not a recommendation. Check what it resolved to: the
+server reports its roots and active adapter in the MCP `instructions` it
+returns at initialization —
 
 ```text
-forge-search: roots: apexyard=/Users/you/code/apexyard
+Active configuration — roots: apexyard=/Users/you/code/apexyard  adapter: apexyard
 ```
 
-Read that line once. If cwd is not what you expected, the wrong tree is
-indexed and every search afterwards returns plausible results from the wrong
-place — the one failure this project exists to prevent, made visible rather
-than silent. An absolute path cannot go wrong this way.
+— which `serve` deliberately does **not** print to stderr, because MCP clients
+render every stderr line as a `[warning]`, and a line printed on every launch
+is a permanent false warning that trains you to ignore the log. Pass
+`--verbose` if you want it on stderr anyway; every other subcommand prints it
+normally.
+
+If cwd is not what you expected, the wrong tree is indexed and every search
+afterwards returns plausible results from the wrong place. An absolute path
+cannot go wrong this way.
 
 Any *other* unexpanded variable is still an error, not a second fallback.
 
@@ -286,15 +292,15 @@ by accident. The cost is orphans: the filename is a hash of the root path, so
 deleting, moving, or renaming a project leaves its index behind forever, and
 you cannot tell from the filename which project it belonged to.
 
-**In-tree** — `--index-dir .forge-search` puts it beside the code, where it is
+**In-tree** — `--index-dir .forge_search` puts it beside the code, where it is
 obvious to find and is deleted along with the project. Two costs: you must
 gitignore it, and it would be indexed by the next run if traversal did not
-exclude `.forge-search` by default (it does — that exclusion is what makes
+exclude `.forge_search` by default (it does — that exclusion is what makes
 this option safe).
 
 ```bash
-forge-search serve --root /abs/path --index-dir .forge-search
-echo '.forge-search/' >> .gitignore
+forge-search serve --root /abs/path --index-dir .forge_search
+echo '.forge_search/' >> .gitignore
 ```
 
 An absolute `--index-dir` is used as-is; a relative one is resolved per root,

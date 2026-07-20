@@ -58,7 +58,7 @@ def index_dir_for(root_path: Path, index_dir: str | None) -> Path:
       orphans: the index is keyed by a hash of the root path, so deleting,
       moving, or renaming a project leaves its index behind forever with no
       way to tell which is which.
-    * **In-tree** (``--index-dir .forge-search``) — the index lives and dies
+    * **In-tree** (``--index-dir .forge_search``) — the index lives and dies
       with the project, is obvious to find, and is deleted when the project
       is. The cost is that it must be gitignored, and it would be indexed by
       the next run if traversal did not exclude it (it does; see

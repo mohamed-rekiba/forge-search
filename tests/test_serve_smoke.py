@@ -115,20 +115,21 @@ def test_server_starts_and_serves_a_search(project):
 def test_server_starts_with_index_dir(project):
     # The exact combination that shipped broken.
     client = Client(
-        "--root", str(project), "--index-dir", ".forge-search", cwd=str(project)
+        "--root", str(project), "--index-dir", ".forge_search", cwd=str(project)
     )
     try:
         client.handshake()
         assert client.call("search_code", query="tokens", top_k=5)["results"]
-        assert (project / ".forge-search").is_dir()
+        assert (project / ".forge_search").is_dir()
     finally:
         client.close()
 
 
-def test_startup_stderr_is_one_informational_line(project):
-    # Every stderr line is rendered as a warning by MCP clients, so routine
-    # traffic showing up there reads as breakage. Only the resolved-roots
-    # line — the wrong-root safety net — is allowed.
+def test_startup_stderr_is_silent(project):
+    # Every stderr line is rendered as `[warning]` by MCP clients. A line
+    # printed on every launch is therefore a permanent false warning, which
+    # trains the operator to ignore the log — so a real one gets ignored too.
+    # The roots summary moved into the MCP instructions instead.
     client = Client("--root", str(project), cwd=str(project))
     try:
         client.handshake()
@@ -138,8 +139,29 @@ def test_startup_stderr_is_one_informational_line(project):
     finally:
         err = client.close()
 
-    lines = [ln for ln in err.strip().splitlines() if ln.strip()]
-    assert len(lines) == 1, f"unexpected stderr chatter:\n{err}"
-    assert lines[0].startswith("forge-search: roots:")
-    assert "Processing request of type" not in err
-    assert "Traceback" not in err
+    assert err.strip() == "", f"unexpected stderr chatter:\n{err}"
+
+
+def test_verbose_restores_the_stderr_line(project):
+    client = Client("--root", str(project), "--verbose", cwd=str(project))
+    try:
+        client.handshake()
+    finally:
+        err = client.close()
+    assert "forge-search: roots:" in err
+
+
+def test_instructions_name_the_roots_and_adapter(project):
+    # Where the summary went. Client-visible metadata, not a warning.
+    client = Client(
+        "--root", str(project), "--adapter", "apexyard", cwd=str(project)
+    )
+    try:
+        instructions = client.handshake()["result"]["instructions"]
+    finally:
+        client.close()
+
+    assert str(project) in instructions
+    # The adapter is named even though it expanded nothing: "which adapter is
+    # active" is a question the operator asked by passing the flag.
+    assert "adapter: apexyard" in instructions

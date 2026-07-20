@@ -322,9 +322,9 @@ class TestSchemaVersioning:
 
 def test_index_dir_puts_the_db_in_the_tree(tmp_path):
     (tmp_path / "a.md").write_text("hello\n")
-    with LexicalIndex(Root(label="p", path=tmp_path), index_dir=".forge-search") as ix:
+    with LexicalIndex(Root(label="p", path=tmp_path), index_dir=".forge_search") as ix:
         ix.reindex()
-        assert ix.db_path == tmp_path / ".forge-search" / "p.db"
+        assert ix.db_path == tmp_path / ".forge_search" / "p.db"
         assert ix.db_path.is_file()
 
 
@@ -333,12 +333,12 @@ def test_in_tree_index_is_never_indexed_by_itself(tmp_path):
     # pass. This exclusion is what makes in-tree storage safe at all.
     (tmp_path / "a.md").write_text("hello\n")
     root = Root(label="p", path=tmp_path)
-    with LexicalIndex(root, index_dir=".forge-search") as ix:
+    with LexicalIndex(root, index_dir=".forge_search") as ix:
         ix.reindex()
         first = ix.reindex().files_indexed
-    with LexicalIndex(root, index_dir=".forge-search") as ix:
+    with LexicalIndex(root, index_dir=".forge_search") as ix:
         assert ix.reindex().files_indexed == first
-        assert not any(".forge-search" in h.path for h in ix.search("hello", limit=50))
+        assert not any(".forge_search" in h.path for h in ix.search("hello", limit=50))
 
 
 def test_default_still_uses_the_shared_cache(tmp_path, monkeypatch):
@@ -347,4 +347,4 @@ def test_default_still_uses_the_shared_cache(tmp_path, monkeypatch):
     (tmp_path / "a.md").write_text("hello\n")
     with LexicalIndex(Root(label="p", path=tmp_path)) as ix:
         assert ix.db_path.parent == cache
-        assert not (tmp_path / ".forge-search").exists()
+        assert not (tmp_path / ".forge_search").exists()

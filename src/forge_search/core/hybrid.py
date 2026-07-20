@@ -53,7 +53,7 @@ class HybridIndex:
     #: Optional final stage. Absent, results keep their fused order.
     reranker: Reranker | None = None
     #: Where indexes live. None = the shared OS cache dir; a path (e.g.
-    #: ".forge-search") stores them in-tree. See cache.index_dir_for.
+    #: ".forge_search") stores them in-tree. See cache.index_dir_for.
     index_dir: str | None = None
 
     _lexical: LexicalIndex = field(init=False)

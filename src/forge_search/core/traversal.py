@@ -53,7 +53,7 @@ DEFAULT_EXCLUDES: frozenset[str] = frozenset(
         # Our own index directory when `--index-dir` puts it in-tree. An
         # index that indexes itself matches on its own contents and grows
         # each pass — this floor is what makes in-tree storage safe at all.
-        ".forge-search",
+        ".forge_search",
         ".hg",
         ".svn",
         "node_modules",

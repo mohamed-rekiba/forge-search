@@ -117,16 +117,25 @@ class Resolution:
     roots: tuple[Root, ...]
     expansions: tuple[tuple[str, str, int], ...] = ()  # (adapter, given label, count)
 
+    #: The adapter named by `--adapter`, if any. Recorded even when it
+    #: expanded nothing: "which adapter is active" is a question the operator
+    #: asked by passing the flag, and silence is not an answer.
+    adapter: str | None = None
+
     def describe(self) -> str:
-        """One line for stderr at startup."""
+        """One line naming the roots and the active adapter."""
         names = ", ".join(f"{r.label}={r.path}" for r in self.roots) or "(none)"
-        if not self.expansions:
-            return f"roots: {names}"
-        expanded = "; ".join(
-            f"{adapter} expanded {label} into {count}"
-            for adapter, label, count in self.expansions
-        )
-        return f"roots: {names}  ({expanded})"
+        parts = [f"roots: {names}"]
+        if self.adapter:
+            parts.append(f"adapter: {self.adapter}")
+        if self.expansions:
+            parts.append(
+                "; ".join(
+                    f"{adapter} expanded {label} into {count}"
+                    for adapter, label, count in self.expansions
+                )
+            )
+        return "  ".join(parts)
 
 
 def resolve_roots(
@@ -180,4 +189,4 @@ def resolve_roots(
                 (chosen.name or type(chosen).__name__, root.label, len(expanded))
             )
 
-    return Resolution(tuple(resolved), tuple(expansions))
+    return Resolution(tuple(resolved), tuple(expansions), adapter=adapter_name)
