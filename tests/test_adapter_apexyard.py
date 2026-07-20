@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
 from forge_search.adapters.apexyard import MARKER, ApexyardRootProvider
 from forge_search.core.roots import DiscoveryLayer, discover_roots
 

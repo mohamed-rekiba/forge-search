@@ -194,6 +194,15 @@ class TestReindexTool:
         assert set(payload["roots"]) == {"alpha", "beta"}
 
     def test_reindex_unknown_project_raises(self, search: ForgeSearch) -> None:
+        """A wrong project name must surface as a tool error naming the known
+        roots — not a bare failure, and not a silent reindex of everything.
+
+        Asserting on `Exception` here would pass on almost any failure,
+        including the wrong one. The message is the part that makes the error
+        actionable, so that is what gets checked.
+        """
+        from mcp.server.fastmcp.exceptions import ToolError
+
         mcp = search.build()
-        with pytest.raises(Exception):
+        with pytest.raises(ToolError, match="unknown project"):
             asyncio.run(mcp.call_tool("reindex", {"project": "nope"}))
