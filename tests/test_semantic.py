@@ -27,6 +27,7 @@ from forge_search.core.semantic import (
     CHUNK_LINES,
     CHUNK_OVERLAP,
     SemanticIndex,
+    breadcrumb,
     chunk_text,
     summary_chunk,
     vec_available,
@@ -261,3 +262,53 @@ class TestSummaryChunkIsIndexed:
             # windows + one summary
             assert written == len(list(chunk_text(body))) + 1
             assert idx.search("Blocks commits containing secrets", limit=3)
+
+
+class TestBreadcrumb:
+    """Per-chunk location context — the deterministic form of contextual
+    retrieval, and the research's highest-ROI recommendation.
+
+    A 12-line window lifted out of a file is frequently unidentifiable. The
+    breadcrumb tells the embedder which file and which region a fragment
+    belongs to, which is the same mechanism that took this corpus from 0% to
+    50% when applied to one chunk per file.
+    """
+
+    def test_finds_the_enclosing_markdown_heading(self) -> None:
+        lines = ["# Overview", "prose", "## Merge gates", "more prose"]
+        assert breadcrumb("docs/guide.md", lines, 4) == "docs/guide.md > Merge gates"
+
+    def test_finds_the_enclosing_python_function(self) -> None:
+        lines = ["import os", "", "def validate_token(t):", "    return t"]
+        assert breadcrumb("src/auth.py", lines, 4) == "src/auth.py > validate_token"
+
+    def test_finds_the_enclosing_shell_function(self) -> None:
+        lines = ["#!/bin/bash", "check_secrets() {", "  grep -r key .", "}"]
+        assert breadcrumb("hooks/h.sh", lines, 3) == "hooks/h.sh > check_secrets"
+
+    def test_finds_the_enclosing_ts_function(self) -> None:
+        lines = ["import x;", "export function deriveGates(cfg) {", "  return cfg;"]
+        assert breadcrumb("src/a.ts", lines, 3) == "src/a.ts > deriveGates"
+
+    def test_takes_the_nearest_preceding_label_not_the_first(self) -> None:
+        """A chunk belongs to the region it sits in, not the file's first one."""
+        lines = ["def first():", "    pass", "", "def second():", "    pass"]
+        assert breadcrumb("m.py", lines, 5) == "m.py > second"
+
+    def test_falls_back_to_the_path_alone(self) -> None:
+        """Plain prose has no structure to point at — the path still locates it."""
+        assert breadcrumb("notes.txt", ["just text", "more"], 2) == "notes.txt"
+
+    def test_chunks_carry_their_breadcrumb(self) -> None:
+        text = "\n".join(["# Setup", "a", "b", "## Usage", "c", "d"])
+        chunks = list(chunk_text(text, size=3, overlap=1, relpath="README.md"))
+
+        assert all(c.text.startswith("README.md") for c in chunks)
+        assert any("Usage" in c.text.splitlines()[0] for c in chunks)
+
+    def test_omitting_relpath_leaves_chunks_unprefixed(self) -> None:
+        """Backwards compatible: callers that do not pass a path get the raw
+        window, so the breadcrumb cannot silently corrupt other callers."""
+        chunks = list(chunk_text("a\nb\nc\nd", size=2, overlap=0))
+        assert not any(c.text.startswith("/") for c in chunks)
+        assert chunks[0].text == "a\nb"

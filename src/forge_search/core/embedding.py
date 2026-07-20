@@ -121,9 +121,21 @@ class OnnxEmbedder:
     Use `forge-search warm` to obtain it.
     """
 
-    def __init__(self, model_dir: Path, dim: int = DEFAULT_DIM) -> None:
+    def __init__(
+        self,
+        model_dir: Path,
+        dim: int = DEFAULT_DIM,
+        *,
+        query_prefix: str = "",
+        doc_prefix: str = "",
+    ) -> None:
         self.model_dir = Path(model_dir)
         self._dim = dim
+        # Role prefixes belong to the model, not the caller. A model trained
+        # with them loses accuracy silently when they are omitted — no error,
+        # just worse results, which is the hardest kind of defect to notice.
+        self.query_prefix = query_prefix
+        self.doc_prefix = doc_prefix
         self._session = None
         self._tokenizer = None
 
@@ -150,10 +162,14 @@ class OnnxEmbedder:
     def dim(self) -> int:
         return self._dim
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str], *, is_query: bool = False) -> list[list[float]]:
         if not texts:
             return []
         assert self._tokenizer is not None and self._session is not None
+
+        prefix = self.query_prefix if is_query else self.doc_prefix
+        if prefix:
+            texts = [prefix + t for t in texts]
 
         encoded = self._tokenizer.encode_batch(texts)
         input_ids = [e.ids for e in encoded]

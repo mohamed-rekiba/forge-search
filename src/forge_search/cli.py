@@ -23,7 +23,7 @@ from .core.bench import BenchQuery, run_bench
 from .core.embedding import HashingEmbedder, OnnxEmbedder
 from .core.hybrid import HybridIndex
 from .core.index import LexicalIndex
-from .core.model import DEFAULT_MODEL, download, is_present, model_dir
+from .core.model import download, is_present, model_dir, resolve_model
 from .core.query import QueryError
 from .core.roots import Root, RootProvider, discover_roots
 from .core.server import DEFAULT_SERVER_NAME, ForgeSearch
@@ -82,19 +82,24 @@ def _embedder(args: argparse.Namespace):
         return None
     if getattr(args, "hashing_embedder", False):
         return HashingEmbedder()
-    if not is_present():
+    spec = resolve_model(getattr(args, "model", None))
+    if not is_present(spec):
         print(
-            "semantic requested but no model is present. Run `forge-search warm` "
+            f"semantic requested but {spec.name} is not present. Run "
+            f"`forge-search warm --model {getattr(args, 'model', None) or 'all-minilm'}` "
             "to fetch it. Continuing with lexical-only search.",
             file=sys.stderr,
         )
         return None
     try:
-        return OnnxEmbedder(model_dir(), dim=DEFAULT_MODEL.dim)
-    except (FileNotFoundError, ImportError) as exc:
-        print(
-            f"semantic unavailable ({exc}); continuing lexical-only.", file=sys.stderr
+        return OnnxEmbedder(
+            model_dir(spec),
+            dim=spec.dim,
+            query_prefix=spec.query_prefix,
+            doc_prefix=spec.doc_prefix,
         )
+    except (FileNotFoundError, ImportError) as exc:
+        print(f"semantic unavailable ({exc}); continuing lexical-only.", file=sys.stderr)
         return None
 
 
@@ -102,7 +107,7 @@ def _cmd_warm(args: argparse.Namespace) -> int:
     """Fetch the embedding model. Explicit by design — a search must never
     trigger a ~90 MB download."""
     try:
-        directory = download(force=args.force)
+        directory = download(resolve_model(args.model), force=args.force)
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -226,12 +231,9 @@ def main(argv: list[str] | None = None) -> int:
         choices=["stdio", "sse", "streamable-http"],
         help="stdio (default) spawns per session; streamable-http serves many.",
     )
-    serve.add_argument(
-        "--semantic", action="store_true", help="Enable the semantic arm"
-    )
-    serve.add_argument(
-        "--hashing-embedder", action="store_true", help=argparse.SUPPRESS
-    )
+    serve.add_argument("--semantic", action="store_true", help="Enable the semantic arm")
+    serve.add_argument("--model", help="Model short name (default: all-minilm)")
+    serve.add_argument("--hashing-embedder", action="store_true", help=argparse.SUPPRESS)
     serve.set_defaults(func=_cmd_serve)
 
     index = sub.add_parser("index", help="Build or refresh indexes")
@@ -245,18 +247,14 @@ def main(argv: list[str] | None = None) -> int:
     search.add_argument("--project", help="Restrict to one root label")
     search.add_argument("--top-k", type=int, default=10)
     search.add_argument("--docs", action="store_true", help="Prose files only")
-    search.add_argument(
-        "--semantic", action="store_true", help="Enable the semantic arm"
-    )
-    search.add_argument(
-        "--hashing-embedder", action="store_true", help=argparse.SUPPRESS
-    )
+    search.add_argument("--semantic", action="store_true", help="Enable the semantic arm")
+    search.add_argument("--model", help="Model short name (default: all-minilm)")
+    search.add_argument("--hashing-embedder", action="store_true", help=argparse.SUPPRESS)
     search.set_defaults(func=_cmd_search)
 
     warm = sub.add_parser("warm", help="Fetch the embedding model (semantic arm)")
-    warm.add_argument(
-        "--force", action="store_true", help="Re-download even if present"
-    )
+    warm.add_argument("--force", action="store_true", help="Re-download even if present")
+    warm.add_argument("--model", help="Model short name (default: all-minilm)")
     warm.set_defaults(func=_cmd_warm)
 
     bench = sub.add_parser(
@@ -270,9 +268,8 @@ def main(argv: list[str] | None = None) -> int:
         help="A query and the file that should be found. Repeatable.",
     )
     bench.add_argument("--top-k", type=int, default=10)
-    bench.add_argument(
-        "--semantic", action="store_true", help="Include the semantic arm"
-    )
+    bench.add_argument("--semantic", action="store_true", help="Include the semantic arm")
+    bench.add_argument("--model", help="Model short name (default: all-minilm)")
     bench.add_argument(
         "--hashing-embedder",
         action="store_true",

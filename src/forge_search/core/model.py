@@ -36,30 +36,64 @@ class ModelSpec:
     dim: int
     files: dict[str, str]  # local filename -> source URL
 
+    #: Some retrieval models (E5, BGE) are trained with explicit role prefixes
+    #: and lose accuracy without them. Silently omitting a required prefix is
+    #: the kind of defect that shows up as mediocre results rather than an
+    #: error, so it is part of the model's identity here rather than something
+    #: a caller must remember.
+    query_prefix: str = ""
+    doc_prefix: str = ""
+
     @property
     def slug(self) -> str:
         return self.name.replace("/", "--")
 
 
-#: MiniLM-class: 384 dimensions, small enough to run on CPU without being
-#: noticeably slow, and the most widely used sentence-transformer export.
-#: Pinned to a specific revision rather than a branch — a model that silently
-#: changes underneath an existing index would make stored vectors incomparable
-#: with newly-computed ones, and nothing would report it.
-DEFAULT_MODEL = ModelSpec(
-    name="sentence-transformers/all-MiniLM-L6-v2",
-    dim=384,
-    files={
-        "model.onnx": (
-            "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/"
-            "resolve/main/onnx/model.onnx"
-        ),
-        "tokenizer.json": (
-            "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/"
-            "resolve/main/tokenizer.json"
-        ),
-    },
-)
+def _hf(
+    repo: str, dim: int, *, query_prefix: str = "", doc_prefix: str = ""
+) -> ModelSpec:
+    """A HuggingFace sentence-transformer with an ONNX export."""
+    base = f"https://huggingface.co/{repo}/resolve/main"
+    return ModelSpec(
+        name=repo,
+        dim=dim,
+        files={
+            "model.onnx": f"{base}/onnx/model.onnx",
+            "tokenizer.json": f"{base}/tokenizer.json",
+        },
+        query_prefix=query_prefix,
+        doc_prefix=doc_prefix,
+    )
+
+
+#: Models are swappable because model choice is an open question here, not a
+#: settled one — and because the only way to answer it is to run the same
+#: benchmark against each.
+#:
+#: The distinction that matters: `all-MiniLM-L6-v2` is trained for SYMMETRIC
+#: similarity ("are these two sentences alike"). Retrieval is ASYMMETRIC — a
+#: short query against a longer passage. `multi-qa-MiniLM-L6-cos-v1` is the
+#: same architecture and size trained on question/answer pairs for exactly
+#: that. Whether it wins on this corpus is measurable, not assumable.
+MODELS: dict[str, ModelSpec] = {
+    # Symmetric sentence-similarity. The best-known model, and the one this
+    # project started with — which was a popularity choice, not a fit choice.
+    "all-minilm": _hf("sentence-transformers/all-MiniLM-L6-v2", 384),
+    # Asymmetric, trained for semantic search over question/passage pairs.
+    "multi-qa-minilm": _hf("sentence-transformers/multi-qa-MiniLM-L6-cos-v1", 384),
+}
+
+DEFAULT_MODEL = MODELS["all-minilm"]
+
+
+def resolve_model(name: str | None) -> ModelSpec:
+    """Look up a model by short name."""
+    if not name:
+        return DEFAULT_MODEL
+    if name not in MODELS:
+        known = ", ".join(sorted(MODELS))
+        raise KeyError(f"unknown model {name!r}; known: {known}")
+    return MODELS[name]
 
 
 def model_dir(spec: ModelSpec = DEFAULT_MODEL) -> Path:

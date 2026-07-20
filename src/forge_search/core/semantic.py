@@ -18,6 +18,7 @@ split the very context that makes the text findable.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ __all__ = [
     "Chunk",
     "chunk_text",
     "summary_chunk",
+    "breadcrumb",
     "SemanticIndex",
     "vec_available",
     "CHUNK_LINES",
@@ -109,14 +111,71 @@ def summary_chunk(relpath: str, text: str) -> Chunk | None:
     return Chunk(start_line=1, text=body)
 
 
+#: Patterns that name a region of a file, checked in order. Deliberately
+#: regex rather than parsing: the goal is a locating label, not a faithful
+#: syntax tree, and a wrong label costs a slightly worse breadcrumb rather
+#: than a crash.
+_HEADING_PATTERNS = (
+    re.compile(r"^\s*(#{1,6})\s+(.*\S)"),  # markdown heading
+    re.compile(r"^\s*(?:export\s+)?(?:async\s+)?def\s+(\w+)"),  # python
+    re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)"),  # js/ts
+    re.compile(r"^\s*(?:export\s+)?class\s+(\w+)"),  # class
+    re.compile(r"^\s*(\w+)\s*\(\)\s*\{"),  # shell function
+    re.compile(r"^\s*(?:export\s+)?const\s+(\w+)\s*="),  # ts const
+)
+
+
+def _label_for(line: str) -> str | None:
+    """The region name a line declares, if any."""
+    for pattern in _HEADING_PATTERNS:
+        match = pattern.match(line)
+        if match:
+            return match.group(match.lastindex or 1).strip()
+    return None
+
+
+def breadcrumb(relpath: str, lines: list[str], upto: int) -> str:
+    """`path > nearest enclosing heading or function` for a chunk.
+
+    This is the deterministic, no-LLM form of contextual retrieval. The
+    published technique generates per-chunk context with an LLM and reports a
+    35–49% reduction in retrieval failures; prepending a structural breadcrumb
+    captures the same mechanism — telling the embedder *where* a fragment lives
+    — at zero inference cost.
+
+    The evidence it works here is local: adding path + doc-comment context to
+    one chunk per file moved semantic recall from 0% to 50% on this corpus.
+    That fix reached only the summary chunk. This reaches every chunk, which
+    is what the published method actually does.
+
+    The breadcrumb is placed in the chunk *text*, not a metadata column, so it
+    is seen by both the embedding and the full-text index rather than only one.
+    """
+    label = None
+    for i in range(min(upto, len(lines)) - 1, -1, -1):
+        label = _label_for(lines[i])
+        if label:
+            break
+    return f"{relpath} > {label}" if label else relpath
+
+
 def chunk_text(
-    text: str, *, size: int = CHUNK_LINES, overlap: int = CHUNK_OVERLAP
+    text: str,
+    *,
+    size: int = CHUNK_LINES,
+    overlap: int = CHUNK_OVERLAP,
+    relpath: str | None = None,
 ) -> Iterator[Chunk]:
-    """Split text into overlapping line windows.
+    """Split text into overlapping line windows, each carrying a breadcrumb.
 
     Blank-only chunks are skipped — embedding whitespace produces a vector
     near the origin that matches everything weakly, which is worse than not
     indexing it.
+
+    When `relpath` is given, every chunk is prefixed with its location. A
+    12-line window taken out of context is frequently unidentifiable — the
+    same dilution that made this corpus score 0% — and the breadcrumb is what
+    tells the embedder which file and which function a fragment belongs to.
     """
     if overlap >= size:
         raise ValueError("overlap must be smaller than chunk size")
@@ -132,6 +191,8 @@ def chunk_text(
             break
         body = "\n".join(window)
         if body.strip():
+            if relpath is not None:
+                body = f"{breadcrumb(relpath, lines, start + 1)}\n{body}"
             yield Chunk(start_line=start + 1, text=body)
         if start + size >= len(lines):
             break
@@ -216,7 +277,7 @@ class SemanticIndex:
         Embedding is the expensive half of indexing, so chunks are batched
         into a single call rather than embedded one at a time.
         """
-        chunks = list(chunk_text(text))
+        chunks = list(chunk_text(text, relpath=relpath))
         # The summary leads, so the file's own description competes on its own
         # terms rather than diluted inside a sliding window. See summary_chunk.
         summary = summary_chunk(relpath, text)
@@ -242,7 +303,12 @@ class SemanticIndex:
 
     def search(self, query: str, *, limit: int = 10) -> list[tuple[str, int, float]]:
         """Nearest neighbours as ``(relpath, line, distance)``, closest first."""
-        vector = self.embedder.embed([query])
+        # Marked as a query so a prefix-trained model applies the right role.
+        # Falls back cleanly for embedders that do not take the argument.
+        try:
+            vector = self.embedder.embed([query], is_query=True)  # type: ignore[call-arg]
+        except TypeError:
+            vector = self.embedder.embed([query])
         if not vector:
             return []
 

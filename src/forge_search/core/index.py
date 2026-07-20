@@ -53,7 +53,7 @@ _PATH_MATCH_SCORE = 1000.0
 #: while missing the paths table entirely — and because the stamp matches, no
 #: later check would ever catch them. A bump is the only way past a bad stamp,
 #: which is itself an argument for making these guards blunt rather than clever.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS files (
