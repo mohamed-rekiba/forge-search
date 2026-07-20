@@ -90,21 +90,34 @@ Add to `.mcp.json` in your project, with an **absolute path**:
 }
 ```
 
-**Do not use `${workspaceFolder}`.** It is a VS Code `launch.json` variable,
-and MCP clients do not agree on it:
+`${workspaceFolder}` also works, but only as a fallback — see below.
+
+It is a VS Code `launch.json` variable, and MCP clients do not agree on it:
 
 | Client | `${workspaceFolder}` |
 |---|---|
 | Claude Code (`.mcp.json`) | **Not supported.** Only environment-variable expansion — `${VAR}` and `${VAR:-default}` — so it is passed through as a literal string. |
 | VS Code (`.vscode/mcp.json`) | Documented as supported, but [several](https://github.com/microsoft/vscode/issues/251263) [open](https://github.com/microsoft/vscode/issues/245905) [bugs](https://github.com/microsoft/vscode/issues/297794) report it resolving to the literal string. |
 
-An earlier version of this README recommended it. It fails at startup with a
-message naming the cause, so the failure is loud rather than silent — but it
-still fails.
+Because it arrives as a literal string either way, forge-search treats
+`${workspaceFolder}` (and `${workspaceFolder}/sub`) as **the working
+directory**. For a stdio MCP server that is the project root in practice —
+verified against a live Claude Code server — but Claude Code's docs explicitly
+tell servers not to depend on cwd and do not guarantee it.
 
-Neither is the working directory a fallback: Claude Code's documentation
-explicitly tells servers not to depend on the cwd of a stdio MCP process, and
-does not guarantee what it is.
+So it is a fallback, not a recommendation. The resolved root is always printed
+at startup:
+
+```text
+forge-search: roots: apexyard=/Users/you/code/apexyard
+```
+
+Read that line once. If cwd is not what you expected, the wrong tree is
+indexed and every search afterwards returns plausible results from the wrong
+place — the one failure this project exists to prevent, made visible rather
+than silent. An absolute path cannot go wrong this way.
+
+Any *other* unexpanded variable is still an error, not a second fallback.
 
 The honest cost of an absolute path is that `.mcp.json` becomes per-machine.
 If the file is shared, `.gitignore` it or template it. Claude Code does set
