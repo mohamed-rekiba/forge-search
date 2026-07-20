@@ -171,8 +171,13 @@ def resolve_roots(
             continue
 
         resolved.extend(expanded)
-        expansions.append(
-            (chosen.name or type(chosen).__name__, root.label, len(expanded))
-        )
+        if expanded != [root]:
+            # Only report a real expansion. An adapter that finds nothing to
+            # expand returns the root unchanged, and announcing "expanded X
+            # into 1" describes a non-event — on a stdio MCP server that line
+            # goes to stderr, where clients render it as a warning.
+            expansions.append(
+                (chosen.name or type(chosen).__name__, root.label, len(expanded))
+            )
 
     return Resolution(tuple(resolved), tuple(expansions))

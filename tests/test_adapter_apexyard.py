@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from forge_search.adapters.apexyard import MARKER, ApexyardRootProvider
-from forge_search.core.roots import Root, resolve_roots
+from forge_search.core.roots import Root, RootProvider, resolve_roots
 
 
 def _make_fork(
@@ -217,3 +217,21 @@ class TestSeamIntegrity:
 
         for module in ("roots", "traversal", "cache", "index", "query", "server"):
             importlib.import_module(f"forge_search.core.{module}")
+
+
+def test_a_no_op_expansion_is_not_reported():
+    # "expanded X into 1" describes nothing happening, and on a stdio MCP
+    # server every stderr line is rendered as a warning by the client.
+    class Passthrough(RootProvider):
+        name = "noop"
+
+        def expand(self, root):
+            return [root]
+
+    res = resolve_roots(
+        [Root(label="a", path=Path.cwd())],
+        adapters=[Passthrough()],
+        adapter_name="noop",
+    )
+    assert res.expansions == ()
+    assert "expanded" not in res.describe()
