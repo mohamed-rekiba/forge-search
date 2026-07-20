@@ -27,6 +27,8 @@ never sees it.
 
 from __future__ import annotations
 
+import logging
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -261,6 +263,21 @@ class ForgeSearch:
 
     def run(self, transport: str = "stdio") -> None:
         """Serve. See the module docstring on transport choice."""
+        # The MCP SDK logs every request at INFO ("Processing request of type
+        # ListToolsRequest"). On stdio that goes to stderr — the only channel
+        # available, since stdout carries JSON-RPC — and MCP clients render
+        # every stderr line as a warning. So routine traffic shows up in the
+        # user's log looking like something went wrong.
+        #
+        # Raised to WARNING unless the operator asked for detail via the
+        # standard env var, so real problems still surface.
+        if not os.environ.get("FORGE_SEARCH_LOG_LEVEL"):
+            logging.getLogger("mcp").setLevel(logging.WARNING)
+        else:
+            logging.getLogger("mcp").setLevel(
+                os.environ["FORGE_SEARCH_LOG_LEVEL"].upper()
+            )
+
         self.build().run(transport=transport)  # type: ignore[arg-type]
 
 

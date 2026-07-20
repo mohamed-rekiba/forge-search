@@ -52,12 +52,17 @@ class HybridIndex:
     weights: ArmWeights = field(default_factory=ArmWeights)
     #: Optional final stage. Absent, results keep their fused order.
     reranker: Reranker | None = None
+    #: Where indexes live. None = the shared OS cache dir; a path (e.g.
+    #: ".forge-search") stores them in-tree. See cache.index_dir_for.
+    index_dir: str | None = None
 
     _lexical: LexicalIndex = field(init=False)
     _semantic: SemanticIndex | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
-        self._lexical = LexicalIndex(self.root, config=self.config)
+        self._lexical = LexicalIndex(
+            self.root, config=self.config, index_dir=self.index_dir
+        )
         if self.embedder is not None and vec_available():
             # Same database file as the lexical arm — one file per root.
             self._semantic = SemanticIndex(self._lexical.db_path, self.embedder)

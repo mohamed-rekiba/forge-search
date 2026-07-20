@@ -116,10 +116,16 @@ class IndexStats:
 class LexicalIndex:
     """An FTS5 index over one root."""
 
-    def __init__(self, root: Root, *, config: TraversalConfig | None = None) -> None:
+    def __init__(
+        self,
+        root: Root,
+        *,
+        config: TraversalConfig | None = None,
+        index_dir: str | None = None,
+    ) -> None:
         self.root = root
         self.config = config or TraversalConfig()
-        self.db_path = index_path_for(root.label, root.path)
+        self.db_path = index_path_for(root.label, root.path, index_dir)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.db_path)
         self._conn.executescript(_SCHEMA)

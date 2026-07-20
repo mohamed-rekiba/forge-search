@@ -22,7 +22,7 @@ import os
 import sys
 from pathlib import Path
 
-__all__ = ["cache_root", "index_path_for"]
+__all__ = ["cache_root", "index_dir_for", "index_path_for"]
 
 _APP = "forge-search"
 
@@ -48,7 +48,32 @@ def cache_root() -> Path:
     return (Path(xdg) if xdg else Path.home() / ".cache") / _APP
 
 
-def index_path_for(label: str, path: Path) -> Path:
+def index_dir_for(root_path: Path, index_dir: str | None) -> Path:
+    """Where one root's index lives.
+
+    Two storage models, each with a real cost:
+
+    * **Shared cache dir** (default) — nothing is written into trees you may
+      not control, and nothing can be committed by accident. The cost is
+      orphans: the index is keyed by a hash of the root path, so deleting,
+      moving, or renaming a project leaves its index behind forever with no
+      way to tell which is which.
+    * **In-tree** (``--index-dir .forge-search``) — the index lives and dies
+      with the project, is obvious to find, and is deleted when the project
+      is. The cost is that it must be gitignored, and it would be indexed by
+      the next run if traversal did not exclude it (it does; see
+      DEFAULT_EXCLUDES).
+
+    Neither dominates, which is why this is a flag rather than a decision
+    made on the caller's behalf.
+    """
+    if index_dir is None:
+        return cache_root()
+    d = Path(index_dir).expanduser()
+    return d if d.is_absolute() else root_path / d
+
+
+def index_path_for(label: str, path: Path, index_dir: str | None = None) -> Path:
     """Return the index file for one root.
 
     The filename carries the label for human legibility and a short hash of
@@ -56,6 +81,11 @@ def index_path_for(label: str, path: Path) -> Path:
     different trees must not collide, and the label alone cannot guarantee
     that.
     """
-    digest = hashlib.sha256(str(path.resolve()).encode()).hexdigest()[:12]
     safe_label = "".join(c if c.isalnum() or c in "-_" else "-" for c in label)[:40]
-    return cache_root() / f"{safe_label}-{digest}.db"
+    base = index_dir_for(path, index_dir)
+    if index_dir is not None:
+        # In-tree: one root, one directory, so the path hash that
+        # disambiguates a shared cache would be noise in the filename.
+        return base / f"{safe_label}.db"
+    digest = hashlib.sha256(str(path.resolve()).encode()).hexdigest()[:12]
+    return base / f"{safe_label}-{digest}.db"

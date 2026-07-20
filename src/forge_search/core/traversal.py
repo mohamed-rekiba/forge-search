@@ -50,6 +50,10 @@ __all__ = ["TraversalConfig", "walk", "excerpt", "DEFAULT_EXCLUDES"]
 DEFAULT_EXCLUDES: frozenset[str] = frozenset(
     {
         ".git",
+        # Our own index directory when `--index-dir` puts it in-tree. An
+        # index that indexes itself matches on its own contents and grows
+        # each pass — this floor is what makes in-tree storage safe at all.
+        ".forge-search",
         ".hg",
         ".svn",
         "node_modules",

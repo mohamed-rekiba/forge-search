@@ -276,13 +276,32 @@ and if that holds, delete the arm rather than carrying it.
 
 ## Indexes
 
-One SQLite file per root, in the OS cache directory
-(`~/Library/Caches/forge-search` on macOS, `$XDG_CACHE_HOME/forge-search` on
-Linux). Never inside the searched tree — an index there would get committed,
-and would be indexed by the next run.
+One SQLite file per root. Two places it can live, and neither is strictly
+better:
 
-Override with `FORGE_SEARCH_CACHE_DIR`. Safe to delete at any time; the next
-search rebuilds.
+**Shared cache directory (default)** — `~/Library/Caches/forge-search` on
+macOS, `$XDG_CACHE_HOME/forge-search` on Linux, `%LOCALAPPDATA%` on Windows.
+Nothing is written into trees you may not control and nothing can be committed
+by accident. The cost is orphans: the filename is a hash of the root path, so
+deleting, moving, or renaming a project leaves its index behind forever, and
+you cannot tell from the filename which project it belonged to.
+
+**In-tree** — `--index-dir .forge-search` puts it beside the code, where it is
+obvious to find and is deleted along with the project. Two costs: you must
+gitignore it, and it would be indexed by the next run if traversal did not
+exclude `.forge-search` by default (it does — that exclusion is what makes
+this option safe).
+
+```bash
+forge-search serve --root /abs/path --index-dir .forge-search
+echo '.forge-search/' >> .gitignore
+```
+
+An absolute `--index-dir` is used as-is; a relative one is resolved per root,
+so several roots each get their own.
+
+`FORGE_SEARCH_CACHE_DIR` overrides the default location. Indexes are safe to
+delete at any time; the next search rebuilds.
 
 Indexes carry a schema version. When it changes, the index is discarded and
 rebuilt rather than migrated in place — a targeted migration that misses one
@@ -304,7 +323,8 @@ deliberate. Substring search over such content would need a trigram index.
 core/       generic. No knowledge of any integration.
   roots      explicit roots + the RootProvider seam; nothing discovered
   traversal  the four defects, fixed as defaults
-  cache      per-root index paths, no absolute path ever persisted
+  cache      per-root index paths (shared cache dir or in-tree), no absolute
+             path ever persisted
   index      FTS5 content + filename matching, incremental, schema-versioned
   query      query escaping; errors kept distinct from empty results
   embedding  the Embedder protocol; hashing (no download) and ONNX

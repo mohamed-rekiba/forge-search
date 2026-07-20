@@ -229,7 +229,10 @@ def _cmd_bench(args: argparse.Namespace) -> int:
         return 2
 
     with HybridIndex(
-        roots[0], embedder=_embedder(args), reranker=_reranker(args)
+        roots[0],
+        embedder=_embedder(args),
+        reranker=_reranker(args),
+        index_dir=args.index_dir,
     ) as index:
         index.reindex()
         print(run_bench(index, queries, top_k=args.top_k).render())
@@ -243,6 +246,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         server_name=args.name,
         embedder=_embedder(args),
         reranker=_reranker(args),
+        index_dir=args.index_dir,
     )
     try:
         search.run(transport=args.transport)
@@ -253,7 +257,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
 def _cmd_index(args: argparse.Namespace) -> int:
     for root in _resolve_roots(args):
-        with LexicalIndex(root) as index:
+        with LexicalIndex(root, index_dir=args.index_dir) as index:
             stats = index.reindex(force=args.force)
             state = (
                 "up to date"
@@ -299,6 +303,17 @@ def _cmd_search(args: argparse.Namespace) -> int:
     if result["truncated"]:
         print("(truncated — raise --top-k for more)", file=sys.stderr)
     return 0
+
+
+def _index_dir_flag(parser: argparse.ArgumentParser) -> None:
+    """Where indexes are stored — see cache.index_dir_for for the trade-off."""
+    parser.add_argument(
+        "--index-dir",
+        help=(
+            "Store indexes here instead of the OS cache dir. Relative paths "
+            "are per-root (e.g. --index-dir .forge-search). Gitignore it."
+        ),
+    )
 
 
 def _add_root_args(parser: argparse.ArgumentParser) -> None:
@@ -362,6 +377,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     search.set_defaults(func=_cmd_search)
 
+    for _p in (serve, index, search):
+        _index_dir_flag(_p)
+
     warm = sub.add_parser("warm", help="Fetch the embedding model (semantic arm)")
     warm.add_argument("--force", action="store_true", help="Re-download even if present")
     warm.add_argument("--model", help="Model short name (default: all-minilm)")
@@ -370,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Fetch the cross-encoder reranker instead of the embedding model",
     )
-    warm.set_defaults(func=_cmd_warm)
+    warm.set_defaults(func=_cmd_warm, index_dir=None)
 
     bench = sub.add_parser(
         "bench", help="Measure whether the semantic arm earns its cost"
@@ -387,6 +405,7 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         help="File of 'query::expected/path' lines (# comments ignored)",
     )
+    _index_dir_flag(bench)
     bench.add_argument("--top-k", type=int, default=10)
     bench.add_argument("--semantic", action="store_true", help="Include the semantic arm")
     bench.add_argument("--model", help="Model short name (default: all-minilm)")
