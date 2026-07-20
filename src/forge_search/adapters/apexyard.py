@@ -44,25 +44,26 @@ class ApexyardRootProvider(RootProvider):
     as a failure would make the common case look broken.
     """
 
-    marker = MARKER
+    name = "apexyard"
 
-    def __init__(self) -> None:
-        self._ops_root: Path | None = None
+    def expand(self, root: Root) -> list[Root]:
+        """One ops fork becomes the fork plus every project with a clone.
 
-    # -- discovery ---------------------------------------------------------
+        Search would still *work* without this — `workspace/` is traversed
+        like any other directory, so a single root finds the same files. What
+        expansion adds is per-project labels, which is what makes
+        `project="name"` filtering possible and keeps result paths relative to
+        each project rather than to the fork.
 
-    def matches(self, start: Path) -> bool:
-        self._ops_root = _find_ops_root(start)
-        return self._ops_root is not None
-
-    def roots(self) -> list[Root]:
-        if self._ops_root is None:  # pragma: no cover - matches() guards this
-            return []
-
-        ops = self._ops_root
+        Selected by `--adapter apexyard`, never detected. If the root turns
+        out not to be a portfolio, the registry simply is not there and the
+        root is returned unchanged — a stated adapter that finds nothing to
+        expand is not an error.
+        """
+        ops = root.path
         # The ops fork under a reserved label. "." matches the convention the
         # registry itself uses for "the fork you are standing in".
-        found = [Root(label=".", path=ops)]
+        found = [Root(label=root.label, path=ops)]
 
         registry, workspace_dir = _resolve_portfolio_paths(ops)
         if registry is None or not registry.is_file():
@@ -76,19 +77,6 @@ class ApexyardRootProvider(RootProvider):
 
 
 # -- helpers ---------------------------------------------------------------
-
-
-def _find_ops_root(start: Path) -> Path | None:
-    """Walk up looking for the fork marker.
-
-    Resolved first so a symlinked start cannot select a fork outside the tree
-    the caller meant.
-    """
-    current = start.resolve()
-    for candidate in (current, *current.parents):
-        if (candidate / MARKER).is_file():
-            return candidate
-    return None
 
 
 def _resolve_portfolio_paths(ops_root: Path) -> tuple[Path | None, Path]:

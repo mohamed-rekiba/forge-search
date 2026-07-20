@@ -9,10 +9,13 @@ tests are what would catch that.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
+import pytest
+
 from forge_search.adapters.apexyard import MARKER, ApexyardRootProvider
-from forge_search.core.roots import DiscoveryLayer, discover_roots
+from forge_search.core.roots import Root, resolve_roots
 
 
 def _make_fork(
@@ -35,52 +38,77 @@ def _make_fork(
     return fork
 
 
-class TestDetection:
-    def test_matches_at_the_fork_root(self, tmp_path: Path) -> None:
-        fork = _make_fork(tmp_path, ["alpha"])
-        assert ApexyardRootProvider().matches(fork)
+class TestExplicitSelection:
+    """Adapters are named, never detected.
 
-    def test_matches_from_a_nested_directory(self, tmp_path: Path) -> None:
-        """Discovery has to work from wherever the user actually is."""
-        fork = _make_fork(tmp_path, ["alpha"])
-        assert ApexyardRootProvider().matches(fork / "workspace" / "alpha" / "src")
+    Detection was removed deliberately: an adapter that fires because it
+    spotted a marker file can fire when unwanted and fail to fire when wanted,
+    both silently.
+    """
 
-    def test_does_not_match_an_unrelated_directory(self, tmp_path: Path) -> None:
-        plain = tmp_path / "plain"
-        plain.mkdir()
-        assert not ApexyardRootProvider().matches(plain)
+    def test_no_adapter_named_leaves_roots_alone(self, tmp_path: Path) -> None:
+        fork = _make_fork(tmp_path, ["alpha"])
+        given = [Root(label="ws", path=fork)]
+
+        result = resolve_roots(given, adapters=[ApexyardRootProvider()])
+
+        assert [r.label for r in result.roots] == ["ws"], (
+            "a marker file present in the tree must NOT auto-enable an adapter"
+        )
+
+    def test_named_adapter_expands(self, tmp_path: Path) -> None:
+        fork = _make_fork(tmp_path, ["alpha", "beta"])
+        given = [Root(label="ws", path=fork)]
+
+        result = resolve_roots(
+            given, adapters=[ApexyardRootProvider()], adapter_name="apexyard"
+        )
+
+        assert {r.label for r in result.roots} == {"ws", "alpha", "beta"}
+
+    def test_unknown_adapter_name_raises(self, tmp_path: Path) -> None:
+        """A typo must fail loudly rather than silently searching unexpanded."""
+        given = [Root(label="ws", path=tmp_path)]
+        with pytest.raises(ValueError, match="unknown adapter"):
+            resolve_roots(
+                given, adapters=[ApexyardRootProvider()], adapter_name="apexyrd"
+            )
+
+    def test_expansion_is_reported(self, tmp_path: Path) -> None:
+        """Expanding one root into several is more than was literally asked
+        for, so it is announced rather than done quietly."""
+        fork = _make_fork(tmp_path, ["alpha"])
+        result = resolve_roots(
+            [Root(label="ws", path=fork)],
+            adapters=[ApexyardRootProvider()],
+            adapter_name="apexyard",
+        )
+
+        assert "apexyard expanded ws into 2" in result.describe()
 
 
 class TestRoots:
     def test_includes_the_ops_fork_and_each_clone(self, tmp_path: Path) -> None:
         fork = _make_fork(tmp_path, ["alpha", "beta"])
-        provider = ApexyardRootProvider()
-        provider.matches(fork)
-
-        assert {r.label for r in provider.roots()} == {".", "alpha", "beta"}
+        roots = ApexyardRootProvider().expand(Root(label="ws", path=fork))
+        assert {r.label for r in roots} == {"ws", "alpha", "beta"}
 
     def test_registered_project_without_a_clone_is_skipped(self, tmp_path: Path) -> None:
         """A partially-cloned portfolio is normal, not an error state."""
         fork = _make_fork(tmp_path, ["alpha", "beta"], clone=["alpha"])
-        provider = ApexyardRootProvider()
-        provider.matches(fork)
-
-        assert {r.label for r in provider.roots()} == {".", "alpha"}
+        roots = ApexyardRootProvider().expand(Root(label="ws", path=fork))
+        assert {r.label for r in roots} == {"ws", "alpha"}
 
     def test_empty_registry_still_yields_the_fork(self, tmp_path: Path) -> None:
         fork = _make_fork(tmp_path, [])
-        provider = ApexyardRootProvider()
-        provider.matches(fork)
-
-        assert [r.label for r in provider.roots()] == ["."]
+        roots = ApexyardRootProvider().expand(Root(label="ws", path=fork))
+        assert [r.label for r in roots] == ["ws"]
 
     def test_missing_registry_still_yields_the_fork(self, tmp_path: Path) -> None:
         fork = _make_fork(tmp_path, ["alpha"])
         (fork / "apexyard.projects.yaml").unlink()
-        provider = ApexyardRootProvider()
-        provider.matches(fork)
-
-        assert [r.label for r in provider.roots()] == ["."]
+        roots = ApexyardRootProvider().expand(Root(label="ws", path=fork))
+        assert [r.label for r in roots] == ["ws"]
 
     def test_quoted_names_parse(self, tmp_path: Path) -> None:
         fork = _make_fork(tmp_path, [])
@@ -88,10 +116,8 @@ class TestRoots:
             'version: 1\nprojects:\n  - name: "quoted-proj"\n    repo: org/x\n'
         )
         (fork / "workspace" / "quoted-proj").mkdir(parents=True)
-        provider = ApexyardRootProvider()
-        provider.matches(fork)
-
-        assert "quoted-proj" in {r.label for r in provider.roots()}
+        roots = ApexyardRootProvider().expand(Root(label="ws", path=fork))
+        assert "quoted-proj" in {r.label for r in roots}
 
     def test_path_traversal_in_a_name_is_rejected(self, tmp_path: Path) -> None:
         """A malicious or malformed name must not select a tree outside the
@@ -100,10 +126,8 @@ class TestRoots:
         (fork / "apexyard.projects.yaml").write_text(
             "version: 1\nprojects:\n  - name: ../../etc\n  - name: ..\n"
         )
-        provider = ApexyardRootProvider()
-        provider.matches(fork)
-
-        assert [r.label for r in provider.roots()] == ["."]
+        roots = ApexyardRootProvider().expand(Root(label="ws", path=fork))
+        assert [r.label for r in roots] == ["ws"]
 
 
 class TestSplitPortfolio:
@@ -132,10 +156,8 @@ class TestSplitPortfolio:
             )
         )
 
-        provider = ApexyardRootProvider()
-        provider.matches(fork)
-
-        assert {r.label for r in provider.roots()} == {".", "gamma"}
+        roots = ApexyardRootProvider().expand(Root(label="ws", path=fork))
+        assert {r.label for r in roots} == {"ws", "gamma"}
 
     def test_malformed_config_falls_back_instead_of_crashing(
         self, tmp_path: Path
@@ -144,35 +166,8 @@ class TestSplitPortfolio:
         (fork / ".claude").mkdir(exist_ok=True)
         (fork / ".claude" / "project-config.json").write_text("{not valid json")
 
-        provider = ApexyardRootProvider()
-        provider.matches(fork)
-
-        assert {r.label for r in provider.roots()} == {".", "alpha"}
-
-
-class TestDiscoveryIntegration:
-    def test_provider_layer_wins_over_git_walk_up(self, tmp_path: Path) -> None:
-        fork = _make_fork(tmp_path, ["alpha"])
-        (fork / ".git").mkdir()
-
-        result = discover_roots(providers=[ApexyardRootProvider()], start=fork)
-
-        assert result.layer is DiscoveryLayer.PROVIDER
-        assert {r.label for r in result.roots} == {".", "alpha"}
-
-    def test_explicit_roots_still_outrank_the_provider(self, tmp_path: Path) -> None:
-        """Explicit configuration is the top layer and must stay that way."""
-        from forge_search.core.roots import Root
-
-        fork = _make_fork(tmp_path, ["alpha"])
-        chosen = Root(label="only", path=tmp_path)
-
-        result = discover_roots(
-            explicit=[chosen], providers=[ApexyardRootProvider()], start=fork
-        )
-
-        assert result.layer is DiscoveryLayer.EXPLICIT
-        assert [r.label for r in result.roots] == ["only"]
+        roots = ApexyardRootProvider().expand(Root(label="ws", path=fork))
+        assert {r.label for r in roots} == {"ws", "alpha"}
 
 
 class TestSeamIntegrity:
@@ -203,10 +198,15 @@ class TestSeamIntegrity:
         import forge_search.core as core_pkg
 
         core_dir = Path(core_pkg.__file__).parent
+        # The rule is that core must not IMPORT the adapters package. The bare
+        # word is legitimate — `resolve_roots(adapters=...)` takes them as a
+        # parameter, which is the seam working as designed, not a violation.
         offenders = [
             path.name
             for path in core_dir.glob("*.py")
-            if "adapters" in path.read_text(encoding="utf-8")
+            if re.search(
+                r"^\s*(from|import)\s+\.*adapters", path.read_text("utf-8"), re.M
+            )
         ]
 
         assert not offenders, f"dependency must be one-way; violated in: {offenders}"

@@ -1,21 +1,29 @@
-"""Root discovery.
+"""Roots: the directory trees that get indexed and searched.
 
-A *root* is one directory tree forge-search indexes and searches. Standalone
-users point at one or more directly; an integration supplies them from
-wherever it keeps that list.
+**Everything here is explicit. Nothing is discovered.**
 
-Discovery is layered, highest precedence first:
+The caller names the roots — in an editor as `--root ${workspaceFolder}`,
+which the editor substitutes at launch; elsewhere as an absolute path. The
+adapter, if any, is named with `--adapter`. There is no walk-up, no
+working-directory inference, no marker sniffing, and no fallback guess.
 
-  1. explicit configuration  (--root flags, config file, env)
-  2. a marker walked up from the start directory  (integration-supplied)
-  3. .git walked up from the start directory      (generic single-repo)
-  4. the start directory itself                   (last resort)
+This replaced a layered discovery scheme, and the reasoning is worth keeping:
 
-**No absolute path is ever persisted.** That is not a style preference: baked
-absolute roots are a known silent-failure mode — they go stale on move,
-rename, or re-clone, the server then fails to launch, and every search quietly
-returns nothing with no error. Roots are resolved fresh on every start so
-there is nothing to go stale.
+* **The caller already knows the answer.** Editors substitute the project path
+  at launch. Inferring it solved a problem that was already solved, and
+  inferring it wrongly is silent — the wrong tree gets indexed and every
+  search returns plausible results from the wrong place.
+* **The staleness argument does not survive.** Discovery was partly justified
+  by baked absolute paths going stale on move or re-clone. A variable
+  substituted at launch cannot go stale that way, so the justification
+  evaporated.
+* **Detection has the same flaw as guessing.** An adapter that enables itself
+  because it spotted a file can fire when unwanted and stay silent when
+  wanted. Naming it costs one flag and removes the whole failure class.
+
+What adapters still do is the part a caller genuinely cannot supply: knowing
+that one root is a portfolio containing several projects, and what each should
+be called.
 """
 
 from __future__ import annotations
@@ -23,10 +31,9 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 
-__all__ = ["Root", "RootProvider", "DiscoveryLayer", "Discovery", "discover_roots"]
+__all__ = ["Root", "RootProvider", "Resolution", "resolve_roots"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,93 +70,104 @@ class Root:
 class RootProvider:
     """The single seam between the generic core and any integration.
 
-    An integration supplies roots and *nothing else*. Everything downstream —
-    discovery, indexing, ranking, the tool surface — consumes this interface
-    and knows nothing about where the list came from.
+    An adapter is a root **expander**, not a root discoverer. It is handed a
+    root the caller has already named, decides whether that root is one it
+    understands, and if so expands it into the several labelled roots it
+    really contains.
+
+    **Adapters are chosen explicitly, never detected.** `--adapter <name>`
+    selects one; without it, roots are used exactly as given.
+
+    Nothing is inferred — not from a marker file in the project, not from the
+    working directory, not by walking parents. Detection was removed on
+    purpose: an adapter that fires because it spotted a file is an adapter
+    that can fire when you did not mean it to, and can fail to fire when you
+    did, both silently. The caller already knows which shape of project this
+    is; asking them costs one flag and removes an entire class of wrong-guess
+    failure.
 
     Keeping the seam this narrow is deliberate. A wider one would let
-    integration concepts leak into the core, at which point "works standalone"
+    integration concepts into the core, at which point "works standalone"
     becomes a claim in a README rather than a property of the code.
     """
 
-    #: Marker filename this provider anchors on during layer-2 discovery,
-    #: or None if it does not participate in walk-up discovery.
-    marker: str | None = None
+    #: The name `--adapter` selects this by.
+    name: str = ""
 
-    def roots(self) -> Sequence[Root]:  # pragma: no cover - interface
-        raise NotImplementedError
-
-    def matches(self, start: Path) -> bool:  # pragma: no cover - interface
-        """Whether this provider applies to `start`."""
-        return False
-
-
-class DiscoveryLayer(Enum):
-    """Which layer produced the roots — reported so a wrong guess is visible.
-
-    Silent misdiscovery is the failure this whole module is built against: if
-    the wrong tree gets indexed, every search returns plausible results from
-    the wrong place, and nothing announces it.
-    """
-
-    EXPLICIT = "explicit"
-    PROVIDER = "provider"
-    GIT = "git"
-    CWD = "cwd"
+    def expand(self, root: Root) -> Sequence[Root]:  # pragma: no cover - interface
+        """Turn one root into the roots it actually contains."""
+        return [root]
 
 
 @dataclass(frozen=True, slots=True)
-class Discovery:
-    layer: DiscoveryLayer
+class Resolution:
+    """The roots that will be searched, and how each came to be.
+
+    `expansions` records which given root an adapter turned into which set, so
+    the operator can see it at startup. A root list that silently differs from
+    what was asked for is the failure this reporting exists to prevent.
+    """
+
     roots: tuple[Root, ...]
+    expansions: tuple[tuple[str, str, int], ...] = ()  # (adapter, given label, count)
 
     def describe(self) -> str:
-        """One line, for logging at startup so the operator can see the choice."""
+        """One line for stderr at startup."""
         names = ", ".join(f"{r.label}={r.path}" for r in self.roots) or "(none)"
-        return f"roots via {self.layer.value}: {names}"
+        if not self.expansions:
+            return f"roots: {names}"
+        expanded = "; ".join(
+            f"{adapter} expanded {label} into {count}"
+            for adapter, label, count in self.expansions
+        )
+        return f"roots: {names}  ({expanded})"
 
 
-def _walk_up(start: Path, predicate) -> Path | None:
-    """Walk from `start` to the filesystem root, returning the first hit.
-
-    Resolved first so a symlinked start directory cannot produce a root that
-    escapes the tree the caller meant.
-    """
-    current = start.resolve()
-    for candidate in (current, *current.parents):
-        if predicate(candidate):
-            return candidate
-    return None
-
-
-def discover_roots(
+def resolve_roots(
+    given: Iterable[Root],
     *,
-    explicit: Iterable[Root] | None = None,
-    providers: Sequence[RootProvider] = (),
-    start: Path | None = None,
-) -> Discovery:
-    """Resolve roots by the layered strategy documented above.
+    adapters: Sequence[RootProvider] = (),
+    adapter_name: str | None = None,
+) -> Resolution:
+    """Resolve the roots to search from the roots the caller named.
 
-    `start` defaults to the current working directory — **not** this module's
-    location. That distinction matters: under a global tool install the package
-    lives in a shared virtualenv far from the user's code, so anchoring on the
-    module path would discover the installation directory instead of the
-    repository the user is sitting in.
+    **Everything is explicit.** Roots are stated by the caller — in an editor
+    via ``--root ${workspaceFolder}``, elsewhere as an absolute path — and the
+    adapter, if any, is named by ``--adapter``. Nothing is discovered, detected,
+    or inferred.
+
+    That is the whole design. Editors already know the project path and
+    substitute it at launch, so inferring it solved a problem the caller had
+    already solved. Detecting the adapter from a marker file had the same
+    shape: it can fire when unwanted and fail to fire when wanted, both
+    silently, and silence is the failure this project exists to eliminate.
+    With no adapter named, roots are used exactly as given.
     """
-    start = (start or Path.cwd()).resolve()
+    resolved: list[Root] = []
+    expansions: list[tuple[str, str, int]] = []
 
-    explicit_roots = tuple(explicit or ())
-    if explicit_roots:
-        return Discovery(DiscoveryLayer.EXPLICIT, explicit_roots)
+    chosen = None
+    if adapter_name:
+        chosen = next((a for a in adapters if a.name == adapter_name), None)
+        if chosen is None:
+            known = ", ".join(a.name for a in adapters if a.name) or "(none available)"
+            raise ValueError(f"unknown adapter {adapter_name!r}; available: {known}")
 
-    for provider in providers:
-        if provider.matches(start):
-            roots = tuple(provider.roots())
-            if roots:
-                return Discovery(DiscoveryLayer.PROVIDER, roots)
+    for root in given:
+        if chosen is None:
+            resolved.append(root)
+            continue
 
-    git_root = _walk_up(start, lambda p: (p / ".git").exists())
-    if git_root is not None:
-        return Discovery(DiscoveryLayer.GIT, (Root(label=git_root.name, path=git_root),))
+        expanded = list(chosen.expand(root))
+        if not expanded:
+            # An adapter that claims a root but yields nothing would silently
+            # drop it. Keep the original rather than searching less than asked.
+            resolved.append(root)
+            continue
 
-    return Discovery(DiscoveryLayer.CWD, (Root(label=start.name or "root", path=start),))
+        resolved.extend(expanded)
+        expansions.append(
+            (chosen.name or type(chosen).__name__, root.label, len(expanded))
+        )
+
+    return Resolution(tuple(resolved), tuple(expansions))

@@ -25,7 +25,7 @@ from .core.hybrid import HybridIndex
 from .core.index import LexicalIndex
 from .core.model import download, is_present, model_dir, resolve_model
 from .core.query import QueryError
-from .core.roots import Root, RootProvider, discover_roots
+from .core.roots import Root, RootProvider, resolve_roots
 from .core.server import DEFAULT_SERVER_NAME, ForgeSearch
 
 __all__ = ["main"]
@@ -49,8 +49,24 @@ def _providers() -> list[RootProvider]:
 
 
 def _resolve_roots(args: argparse.Namespace) -> list[Root]:
+    """Roots are always explicit — there is no discovery.
+
+    In an editor this is `--root ${workspaceFolder}`, which the editor
+    substitutes at launch. Everywhere else it is an absolute path. Guessing
+    was removed because the caller already knows the answer, and guessing
+    wrongly is silent.
+    """
+    if not args.root:
+        raise SystemExit(
+            "no --root given. forge-search does not guess which project you "
+            "mean.\n"
+            "  editor:   --root ${workspaceFolder}\n"
+            "  terminal: --root /absolute/path/to/project\n"
+            "  labelled: --root myproject=/absolute/path"
+        )
+
     explicit: list[Root] = []
-    for raw in args.root or []:
+    for raw in args.root:
         # "label=path" or just "path", in which case the directory name is the
         # label. Labels stay relative — never an absolute path (see roots.py).
         label, _, path_str = raw.partition("=")
@@ -61,15 +77,16 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:
             raise SystemExit(f"not a directory: {path}")
         explicit.append(Root(label=label or path.name, path=path))
 
-    discovery = discover_roots(
-        explicit=explicit,
-        providers=_providers(),
-        start=Path(args.start).resolve() if args.start else None,
+    resolution = resolve_roots(
+        explicit,
+        adapters=_providers(),
+        adapter_name=getattr(args, "adapter", None),
     )
-    # Always report how roots were chosen. A wrong guess that stays silent is
-    # the failure mode; announcing it costs one line.
-    print(f"forge-search: {discovery.describe()}", file=sys.stderr)
-    return list(discovery.roots)
+    # Always report the resolved set. An adapter that expands one root into
+    # several is doing something the caller did not literally ask for, so it
+    # says so rather than quietly searching more than was requested.
+    print(f"forge-search: {resolution.describe()}", file=sys.stderr)
+    return list(resolution.roots)
 
 
 def _embedder(args: argparse.Namespace):
@@ -206,12 +223,12 @@ def _add_root_args(parser: argparse.ArgumentParser) -> None:
         "--root",
         action="append",
         metavar="[LABEL=]PATH",
-        help="A directory to index. Repeatable. Defaults to auto-discovery.",
+        help="A directory to index, [LABEL=]PATH. Required. Repeatable.",
     )
     parser.add_argument(
-        "--start",
-        metavar="DIR",
-        help="Where auto-discovery begins. Defaults to the current directory.",
+        "--adapter",
+        metavar="NAME",
+        help="Force a portfolio adapter (e.g. apexyard) instead of detecting it.",
     )
 
 
