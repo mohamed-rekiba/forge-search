@@ -33,7 +33,10 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from .index import Hit, LexicalIndex
+from .embedding import Embedder
+from .fusion import ArmWeights
+from .hybrid import HybridIndex, SearchMode
+from .index import Hit
 from .query import QueryError
 from .roots import Root
 from .traversal import TraversalConfig
@@ -60,14 +63,25 @@ class ForgeSearch:
     roots: Sequence[Root]
     server_name: str = DEFAULT_SERVER_NAME
     config: TraversalConfig = field(default_factory=TraversalConfig)
-    _indexes: dict[str, LexicalIndex] = field(default_factory=dict, init=False)
+    #: Supplying an embedder enables the semantic arm. Absent (the default)
+    #: means lexical-only, which is a supported configuration rather than a
+    #: degraded one.
+    embedder: Embedder | None = None
+    weights: ArmWeights = field(default_factory=ArmWeights)
+    mode: str = SearchMode.HYBRID
+    _indexes: dict[str, HybridIndex] = field(default_factory=dict, init=False)
 
     # -- index lifecycle ---------------------------------------------------
 
-    def _index_for(self, root: Root) -> LexicalIndex:
+    def _index_for(self, root: Root) -> HybridIndex:
         index = self._indexes.get(root.label)
         if index is None:
-            index = LexicalIndex(root, config=self.config)
+            index = HybridIndex(
+                root,
+                embedder=self.embedder,
+                config=self.config,
+                weights=self.weights,
+            )
             self._indexes[root.label] = index
         return index
 
@@ -76,7 +90,7 @@ class ForgeSearch:
             index.close()
         self._indexes.clear()
 
-    def _ensure_fresh(self, index: LexicalIndex) -> bool:
+    def _ensure_fresh(self, index: HybridIndex) -> bool:
         """Reindex if the index disagrees with disk. Returns True if it did."""
         if index.is_stale():
             index.reindex()
@@ -111,7 +125,7 @@ class ForgeSearch:
             try:
                 if self._ensure_fresh(index):
                     reindexed.append(root.label)
-                found = index.search(query, limit=top_k)
+                found = index.search(query, limit=top_k, mode=self.mode)
             except QueryError:
                 # Propagate — the caller wrote an unparseable query and needs
                 # to know. Never silently degrade this into "no results".

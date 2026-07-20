@@ -125,6 +125,30 @@ class LexicalIndex:
         """
         return self._current_files() != self._indexed_files()
 
+    def indexed_count(self) -> int:
+        """How many files this index currently holds."""
+        return self._conn.execute("SELECT count(*) FROM files").fetchone()[0]
+
+    def indexed_relpaths(self) -> list[str]:
+        """Every indexed relpath. Used to backfill a companion index that was
+        added after this one was already populated."""
+        return [r[0] for r in self._conn.execute("SELECT relpath FROM files").fetchall()]
+
+    def pending_changes(self, *, force: bool = False) -> tuple[list[str], list[str]]:
+        """Return ``(changed, removed)`` relpaths without applying anything.
+
+        Exists so a composing index can keep a second store in step using the
+        *same* change set this arm is about to apply. Duplicating the size and
+        mtime bookkeeping elsewhere would create a second source of truth that
+        can drift from this one — and a drifted pair returns hits from one arm
+        pointing at content the other has already dropped.
+        """
+        on_disk = self._current_files()
+        indexed = {} if force else self._indexed_files()
+        changed = [rel for rel, meta in on_disk.items() if indexed.get(rel) != meta]
+        removed = [rel for rel in indexed if rel not in on_disk]
+        return changed, removed
+
     def reindex(self, *, force: bool = False) -> IndexStats:
         """Bring the index in line with disk.
 
