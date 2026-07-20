@@ -185,6 +185,12 @@ token counts are trivially improved by returning less, so a mode that halves
 its output by dropping the answer has not won. Every comparison is at **equal
 answer-recall**.
 
+**It has already been run on a real corpus, and the answer was unflattering:**
+with a verified-working MiniLM model and 16,726 indexed chunks, the semantic
+arm scored **0% recall** across 8 queries — six of them written specifically to
+favour it. See [BENCHMARK.md](BENCHMARK.md) for the full result and its limits.
+The arm is opt-in (`--semantic`), so the default already reflects that finding.
+
 `verdict()` will say *"pure overhead — remove the arm"* and *"hybrid is WORSE
 than lexical"* as readily as the opposite. If it says the semantic arm earns
 nothing on your corpus, set `ArmWeights(semantic=0.0)` — no release needed —
