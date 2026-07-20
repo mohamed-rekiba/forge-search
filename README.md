@@ -24,11 +24,20 @@ Each is fixed here as a **default**, not an option — because every one of them
 was already fixable by passing the right flag, and nobody did. Correctness that
 depends on remembering a flag is not correctness.
 
-A fifth turned up while building this one: searching `require-active-ticket`
-raised `no such column: active`, because SQLite's full-text engine read the
-hyphens as syntax. The error was caught and returned as an empty list. Valid
-query, real matches present, zero results, no error — the same defect, in the
-tool built to fix it. See `core/query.py`.
+Building it turned up five more of the same shape, every one self-inflicted and
+every one found by running against real content rather than by the test suite:
+
+| Found | What happened |
+|---|---|
+| Hyphenated queries | `require-active-ticket` raised `no such column: active` — the full-text engine read the hyphens as syntax. The error was caught and returned as an empty list. Valid query, real matches present, zero results, no error. |
+| Semantic backfill | Enabling the semantic arm on an existing index left it permanently empty: the lexical arm reported no changes, so nothing was built. Hybrid degraded to lexical, so nothing looked wrong. |
+| Filename lookup | Two files were unfindable by name because neither contains its own filename — a content-only index cannot reach them. |
+| Version guard | The guard added to catch the above only cleared indexes that already had a version stamp. An *unstamped* index is precisely a pre-versioning one, so it stamped the current version onto stale data and made the gap permanent. |
+| Bad stamp | That buggy guard had already mis-stamped a real index, which the fixed code then correctly skipped. Only a version bump gets past a bad stamp. |
+
+The consistency of that pattern is the reason `bench` exists, and the reason
+the codebase prefers blunt mechanisms over clever ones. Three of the five were
+caused by an optimisation that was right in the abstract and wrong in effect.
 
 ## Install
 
@@ -102,7 +111,11 @@ Both are provided by the MCP SDK directly; no web framework is involved.
 
 ### `search_code(query, project=None, top_k=10)`
 
-Full-text search across all roots, or one named root.
+Full-text search across all roots, or one named root. Searches **both file
+contents and filenames** — a filename match ranks above incidental content
+mentions, because someone searching `auth.py` wants that file rather than the
+tests referencing it. This matters more than it sounds: a file frequently does
+not contain its own name, so a content-only index cannot find it at all.
 
 Queries are matched **literally** — hyphens, dots, slashes, and parentheses in
 identifiers and paths are searched as written, not parsed as operators. Prefix
@@ -146,6 +159,37 @@ after edits, is a convention — and conventions nobody follows are what produce
 every defect above. A stale index has the same shape: plausible results, no
 error, nothing that announces the problem.
 
+## Is the semantic arm worth it?
+
+`bench` answers that with a number rather than an opinion, and is written so
+the unflattering answer is as easy to reach as the flattering one:
+
+```bash
+forge-search bench --semantic \
+  --query "validate_token::src/auth.py" \
+  --query "how sessions expire::docs/sessions.md"
+```
+
+```
+mode         recall      chars    p50 ms    p95 ms
+lexical     100.0%      3,184       0.3       0.5
+hybrid      100.0%      3,184       0.2       0.4
+
+Verdict:
+  Hybrid and lexical are within 0.0% on answer-recall. The semantic arm is
+  not earning its cost on this corpus…
+```
+
+Each query names the file that *should* be found. That is not optional:
+token counts are trivially improved by returning less, so a mode that halves
+its output by dropping the answer has not won. Every comparison is at **equal
+answer-recall**.
+
+`verdict()` will say *"pure overhead — remove the arm"* and *"hybrid is WORSE
+than lexical"* as readily as the opposite. If it says the semantic arm earns
+nothing on your corpus, set `ArmWeights(semantic=0.0)` — no release needed —
+and if that holds, delete the arm rather than carrying it.
+
 ## Indexes
 
 One SQLite file per root, in the OS cache directory
@@ -155,6 +199,12 @@ and would be indexed by the next run.
 
 Override with `FORGE_SEARCH_CACHE_DIR`. Safe to delete at any time; the next
 search rebuilds.
+
+Indexes carry a schema version. When it changes, the index is discarded and
+rebuilt rather than migrated in place — a targeted migration that misses one
+table leaves the index looking healthy while silently missing a capability,
+which is a failure this project has already shipped twice. A rebuild costs
+seconds; a silently incomplete index costs correctness indefinitely.
 
 ## Known limitation
 
@@ -171,8 +221,14 @@ core/       generic. No knowledge of any integration.
   roots      layered discovery + the RootProvider seam
   traversal  the four defects, fixed as defaults
   cache      per-root index paths, no absolute path ever persisted
-  index      FTS5, incremental reindex, staleness detection
+  index      FTS5 content + filename matching, incremental, schema-versioned
   query      query escaping; errors kept distinct from empty results
+  embedding  the Embedder protocol; hashing (no download) and ONNX
+  semantic   chunking + sqlite-vec, importable only when installed
+  fusion     RRF; degrades to exactly the lexical order when an arm is empty
+  hybrid     composes both arms so neither imports the other
+  bench      the measurement that judges the semantic arm
+  model      explicit model fetch; separate so embedding never imports network
   server     the MCP tool surface
 adapters/   integration-specific root providers, loaded only when detected
 ```
@@ -186,7 +242,8 @@ the code.
 
 ```bash
 uv sync
-uv run pytest        # 62 tests
+uv run pytest                    # 150 tests, lexical-only
+uv run --extra semantic pytest   # same suite with the semantic arm
 ```
 
 ## Licence
