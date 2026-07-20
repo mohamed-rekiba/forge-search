@@ -68,18 +68,15 @@ forge-search serve --root api=~/code/api
 **`--root` is required. Nothing is discovered.**
 
 There is no walk-up, no working-directory inference, no marker sniffing, and
-no fallback guess. Your editor already knows the project path and substitutes
-it at launch; inferring it would solve a problem that is already solved, and
-inferring it *wrongly* is silent — the wrong tree gets indexed and every
-search returns plausible results from somewhere you did not ask about.
+no fallback guess. Inferring the root *wrongly* is silent — the wrong tree
+gets indexed and every search returns plausible results from somewhere you did
+not ask about. An absolute path cannot do that.
 
 Omitting `--root` prints the three correct forms rather than picking one.
 
 ## Register with an MCP client
 
-Add to `.mcp.json` in your project. `${workspaceFolder}` is substituted by the
-editor at launch, so it is always the current project and can never go stale
-the way a written-in absolute path can:
+Add to `.mcp.json` in your project, with an **absolute path**:
 
 ```json
 {
@@ -87,14 +84,34 @@ the way a written-in absolute path can:
     "forge-search": {
       "type": "stdio",
       "command": "forge-search",
-      "args": ["serve", "--root", "${workspaceFolder}"]
+      "args": ["serve", "--root", "/absolute/path/to/project"]
     }
   }
 }
 ```
 
-Outside an editor, use an absolute path. Several roots are fine — repeat
-`--root`, optionally labelling each:
+**Do not use `${workspaceFolder}`.** It is a VS Code `launch.json` variable,
+and MCP clients do not agree on it:
+
+| Client | `${workspaceFolder}` |
+|---|---|
+| Claude Code (`.mcp.json`) | **Not supported.** Only environment-variable expansion — `${VAR}` and `${VAR:-default}` — so it is passed through as a literal string. |
+| VS Code (`.vscode/mcp.json`) | Documented as supported, but [several](https://github.com/microsoft/vscode/issues/251263) [open](https://github.com/microsoft/vscode/issues/245905) [bugs](https://github.com/microsoft/vscode/issues/297794) report it resolving to the literal string. |
+
+An earlier version of this README recommended it. It fails at startup with a
+message naming the cause, so the failure is loud rather than silent — but it
+still fails.
+
+Neither is the working directory a fallback: Claude Code's documentation
+explicitly tells servers not to depend on the cwd of a stdio MCP process, and
+does not guarantee what it is.
+
+The honest cost of an absolute path is that `.mcp.json` becomes per-machine.
+If the file is shared, `.gitignore` it or template it. Claude Code does set
+`CLAUDE_PROJECT_DIR` in the spawned server's environment — but it is not
+available at config-parse time, so it cannot be used in `args`.
+
+Several roots are fine — repeat `--root`, optionally labelling each:
 
 ```json
 "args": ["serve",
@@ -118,7 +135,7 @@ subdirectories are traversed like any others. What an adapter adds is
 and keeps result paths relative to each project rather than to the parent.
 
 ```bash
-forge-search serve --root ws=${workspaceFolder} --adapter apexyard
+forge-search serve --root ws=/absolute/path/to/portfolio --adapter apexyard
 # → apexyard expanded ws into 4
 ```
 

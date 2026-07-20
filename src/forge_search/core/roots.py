@@ -2,21 +2,27 @@
 
 **Everything here is explicit. Nothing is discovered.**
 
-The caller names the roots — in an editor as `--root ${workspaceFolder}`,
-which the editor substitutes at launch; elsewhere as an absolute path. The
-adapter, if any, is named with `--adapter`. There is no walk-up, no
-working-directory inference, no marker sniffing, and no fallback guess.
+The caller names the roots as absolute paths. The adapter, if any, is named
+with `--adapter`. There is no walk-up, no working-directory inference, no
+marker sniffing, and no fallback guess.
+
+An earlier version of this docstring said to use `--root ${workspaceFolder}`
+and let the editor substitute it. That was wrong: it is a VS Code
+`launch.json` variable, Claude Code's `.mcp.json` expands environment
+variables only, and it reached a real client as a literal string. See
+README.md for the per-client table.
 
 This replaced a layered discovery scheme, and the reasoning is worth keeping:
 
-* **The caller already knows the answer.** Editors substitute the project path
-  at launch. Inferring it solved a problem that was already solved, and
-  inferring it wrongly is silent — the wrong tree gets indexed and every
-  search returns plausible results from the wrong place.
-* **The staleness argument does not survive.** Discovery was partly justified
-  by baked absolute paths going stale on move or re-clone. A variable
-  substituted at launch cannot go stale that way, so the justification
-  evaporated.
+* **The caller already knows the answer.** Inferring it solved a problem the
+  caller had already solved, and inferring it wrongly is silent — the wrong
+  tree gets indexed and every search returns plausible results from the wrong
+  place. A wrong absolute path fails loudly instead.
+* **Staleness is the honest cost, and it is the smaller one.** Discovery was
+  partly justified by baked absolute paths going stale on move or re-clone.
+  That cost is real — an absolute path makes a shared `.mcp.json`
+  per-machine — but it fails at startup with a message, where a wrong guess
+  fails silently on every query forever.
 * **Detection has the same flaw as guessing.** An adapter that enables itself
   because it spotted a file can fire when unwanted and stay silent when
   wanted. Naming it costs one flag and removes the whole failure class.
@@ -131,15 +137,14 @@ def resolve_roots(
 ) -> Resolution:
     """Resolve the roots to search from the roots the caller named.
 
-    **Everything is explicit.** Roots are stated by the caller — in an editor
-    via ``--root ${workspaceFolder}``, elsewhere as an absolute path — and the
-    adapter, if any, is named by ``--adapter``. Nothing is discovered, detected,
-    or inferred.
+    **Everything is explicit.** Roots are stated by the caller as absolute
+    paths, and the adapter, if any, is named by ``--adapter``. Nothing is
+    discovered, detected, or inferred.
 
-    That is the whole design. Editors already know the project path and
-    substitute it at launch, so inferring it solved a problem the caller had
-    already solved. Detecting the adapter from a marker file had the same
-    shape: it can fire when unwanted and fail to fire when wanted, both
+    That is the whole design. Inferring the root solved a problem the caller
+    had already solved, and a wrong inference is silent where a wrong absolute
+    path fails at startup. Detecting the adapter from a marker file had the
+    same shape: it can fire when unwanted and fail to fire when wanted, both
     silently, and silence is the failure this project exists to eliminate.
     With no adapter named, roots are used exactly as given.
     """

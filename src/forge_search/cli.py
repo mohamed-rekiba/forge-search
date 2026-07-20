@@ -16,6 +16,7 @@ query ran against real content.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -30,6 +31,9 @@ from .core.roots import Root, RootProvider, resolve_roots
 from .core.server import DEFAULT_SERVER_NAME, ForgeSearch
 
 __all__ = ["main"]
+
+#: `${VAR}` or `$VAR` left in a path — a client that did not substitute it.
+_UNEXPANDED = re.compile(r"\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _providers() -> list[RootProvider]:
@@ -52,18 +56,21 @@ def _providers() -> list[RootProvider]:
 def _resolve_roots(args: argparse.Namespace) -> list[Root]:
     """Roots are always explicit — there is no discovery.
 
-    In an editor this is `--root ${workspaceFolder}`, which the editor
-    substitutes at launch. Everywhere else it is an absolute path. Guessing
-    was removed because the caller already knows the answer, and guessing
-    wrongly is silent.
+    Always an absolute path. This used to recommend `${workspaceFolder}` on
+    the belief that editors substitute it; they do not agree that they do, and
+    it reached a real MCP client as a literal string. See README.md.
+
+    Guessing was removed because the caller already knows the answer, and
+    guessing wrongly is silent.
     """
     if not args.root:
         raise SystemExit(
             "no --root given. forge-search does not guess which project you "
             "mean.\n"
-            "  editor:   --root ${workspaceFolder}\n"
-            "  terminal: --root /absolute/path/to/project\n"
-            "  labelled: --root myproject=/absolute/path"
+            "  --root /absolute/path/to/project\n"
+            "  --root myproject=/absolute/path        (labelled)\n"
+            "\nUse an absolute path. `${workspaceFolder}` is a VS Code "
+            "variable and is not expanded by every MCP client."
         )
 
     explicit: list[Root] = []
@@ -75,6 +82,20 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:
             path_str, label = label, ""
         path = Path(path_str).expanduser().resolve()
         if not path.is_dir():
+            # An unexpanded `${...}` is the most likely cause by far, and the
+            # bare "not a directory" that used to print here sent people
+            # looking for a missing folder instead of a config that never got
+            # substituted. Editors differ on which variables they expand, so
+            # name the actual problem.
+            if _UNEXPANDED.search(path_str):
+                raise SystemExit(
+                    f"--root contains an unexpanded variable: {path_str}\n"
+                    "Your MCP client did not substitute it. `${workspaceFolder}` "
+                    "is a VS Code variable and is NOT expanded by every client "
+                    "(Claude Code's .mcp.json does environment-variable "
+                    "expansion only).\nUse an absolute path, or a variable your "
+                    "client documents as supported."
+                )
             raise SystemExit(f"not a directory: {path}")
         explicit.append(Root(label=label or path.name, path=path))
 
