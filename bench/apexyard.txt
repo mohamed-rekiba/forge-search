@@ -1,0 +1,46 @@
+# Benchmark fixture: conceptual queries against an apexyard-shaped corpus.
+#
+# One `query::expected/path` per line; `#` comments and blank lines ignored.
+# Every query names the file that should be found, because recall cannot be
+# measured without a known-correct answer — and a harness without recall
+# rewards a mode for returning less.
+#
+# Six of the eight are deliberately conceptual: phrased the way someone asks a
+# question, sharing few or no literal tokens with the target. Those are the
+# ones lexical search cannot reach, and the reason the semantic arm exists.
+#
+# This file exists because the original 8-query run lived only in a shell
+# history. A benchmark you cannot re-run is an anecdote.
+
+how do I know if a merge is allowed::.claude/rules/pr-workflow.md
+what stops me committing secrets::.claude/hooks/check-secrets.sh
+when can work move to the next stage::.claude/rules/workflow-gates.md
+why was my edit blocked::.claude/hooks/require-active-ticket.sh
+recording that the owner signed off on shipping::.claude/skills/approve-merge/SKILL.md
+keeping private project names off public trackers::.claude/rules/leak-protection.md
+block-main-push::.claude/hooks/block-main-push.sh
+sdlc::workflows/sdlc.md
+
+# --- expanded 2026-07-21 -----------------------------------------------------
+# The original eight made every comparison a one-query swing: a single
+# query flipping is 12.5 points, which is larger than most real effects.
+# Twenty-six queries make one flip 3.8 points. Still small, still stated.
+
+what should I call my branch::.claude/rules/git-conventions.md
+how should I write status updates::.claude/rules/reporting-style.md
+when should I think before acting::.claude/rules/plan-mode.md
+running several agents at once::.claude/rules/parallel-work.md
+recording why we chose one option over another::.claude/rules/agdr-decisions.md
+naming conventions for variables and files::.claude/rules/code-standards.md
+building another repo without corrupting this one::.claude/rules/isolated-builds.md
+repeating the same task until it passes::.claude/rules/loop-mode.md
+prefer an existing command over doing it by hand::.claude/rules/skill-first.md
+explaining jargon to a newcomer::.claude/rules/glossary-lookup.md
+staging every file at once is forbidden::.claude/hooks/block-git-add-all.sh
+checks to run before sending code up::.claude/hooks/pre-push-gate.sh
+spawn parallel workers::.claude/skills/fan-out/SKILL.md
+record a technical decision::.claude/skills/decide/SKILL.md
+cutting a new version::.claude/skills/release/SKILL.md
+how someone else checks my code::workflows/code-review.md
+the shape a decision record takes::templates/agdr.md
+how versions get shipped::docs/release-process.md
