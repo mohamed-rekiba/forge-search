@@ -59,9 +59,7 @@ class TestRoots:
 
         assert {r.label for r in provider.roots()} == {".", "alpha", "beta"}
 
-    def test_registered_project_without_a_clone_is_skipped(
-        self, tmp_path: Path
-    ) -> None:
+    def test_registered_project_without_a_clone_is_skipped(self, tmp_path: Path) -> None:
         """A partially-cloned portfolio is normal, not an error state."""
         fork = _make_fork(tmp_path, ["alpha", "beta"], clone=["alpha"])
         provider = ApexyardRootProvider()

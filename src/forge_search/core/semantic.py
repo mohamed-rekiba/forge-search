@@ -38,6 +38,7 @@ __all__ = [
     "CHUNK_LINES",
     "CHUNK_OVERLAP",
     "SUMMARY_SCAN_LINES",
+    "USE_STRUCTURAL_CHUNKING",
 ]
 
 #: Lines per chunk. Large enough to carry meaning, small enough that a hit
@@ -185,6 +186,32 @@ def breadcrumb(relpath: str, lines: list[str], upto: int) -> str:
             break
     return f"{relpath} > {label}" if label else relpath
 
+
+#: Which chunker to use by default.
+#:
+#: MEASURED, and the measurement contradicts the literature. On this corpus:
+#:
+#:     breadcrumbs + line windows ......... 87.5% semantic recall
+#:     breadcrumbs + structural chunks .... 75.0% semantic recall
+#:
+#: cAST (ACL Findings EMNLP 2025) reports ~4.3 points of Recall@5 *gained*
+#: from structure-aware chunking on code retrieval. Here it lost 12.5 points.
+#:
+#: Both numbers come from an 8-query fixture, so that is a one-query
+#: difference and neither result is conclusive on its own. But the honest
+#: default is the configuration that measured better on the corpus actually
+#: being searched, not the one a paper measured on a different corpus with a
+#: real AST parser instead of these regexes.
+#:
+#: Plausible reasons for the divergence, none verified: this corpus is mostly
+#: markdown and shell rather than the application code cAST benchmarked;
+#: regex boundaries are cruder than AST boundaries; and variable-size
+#: structural regions may interact badly with a fixed top-k.
+#:
+#: `structural_chunks` remains available and tested. Re-measure before
+#: switching — on a corpus of real application code the paper's result may
+#: well hold.
+USE_STRUCTURAL_CHUNKING = False
 
 #: A structural region longer than this is windowed further. A 400-line
 #: function embedded whole is as diluted as a 12-line window is contextless —
@@ -406,7 +433,8 @@ class SemanticIndex:
         Embedding is the expensive half of indexing, so chunks are batched
         into a single call rather than embedded one at a time.
         """
-        chunks = list(structural_chunks(text, relpath=relpath))
+        chunker = structural_chunks if USE_STRUCTURAL_CHUNKING else chunk_text
+        chunks = list(chunker(text, relpath=relpath))
         # The summary leads, so the file's own description competes on its own
         # terms rather than diluted inside a sliding window. See summary_chunk.
         summary = summary_chunk(relpath, text)

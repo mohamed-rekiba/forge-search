@@ -150,9 +150,7 @@ class TestRootNormalisation:
         assert root.path.is_absolute()
         assert root.path == (tmp_path / "proj").resolve()
 
-    def test_search_works_from_a_relative_root(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
+    def test_search_works_from_a_relative_root(self, tmp_path: Path, monkeypatch) -> None:
         """End-to-end: the failure the clean-install test actually hit."""
         from forge_search.core.index import LexicalIndex
         from forge_search.core.roots import Root
@@ -175,6 +173,5 @@ class TestRootNormalisation:
         (tmp_path / "code").mkdir()
 
         assert (
-            Root(label="code", path=Path("~/code")).path
-            == (tmp_path / "code").resolve()
+            Root(label="code", path=Path("~/code")).path == (tmp_path / "code").resolve()
         )

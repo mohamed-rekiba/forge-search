@@ -17,9 +17,7 @@ from forge_search.core.hybrid import HybridIndex, SearchMode
 from forge_search.core.roots import Root
 from forge_search.core.semantic import vec_available
 
-requires_vec = pytest.mark.skipif(
-    not vec_available(), reason="sqlite-vec not installed"
-)
+requires_vec = pytest.mark.skipif(not vec_available(), reason="sqlite-vec not installed")
 
 
 @pytest.fixture(autouse=True)
@@ -135,9 +133,7 @@ class TestVerdict:
 
     def test_inconclusive_without_both_baselines(self) -> None:
         report = BenchReport(
-            results={
-                SearchMode.LEXICAL: ModeResult(SearchMode.LEXICAL, 1.0, 10, [1.0])
-            },
+            results={SearchMode.LEXICAL: ModeResult(SearchMode.LEXICAL, 1.0, 10, [1.0])},
             query_count=5,
         )
         assert "inconclusive" in report.verdict()

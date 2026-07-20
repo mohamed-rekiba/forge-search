@@ -46,9 +46,7 @@ def search(tmp_path: Path):
 
 
 class TestToolRegistration:
-    def test_tools_are_registered_under_the_configured_name(
-        self, tmp_path: Path
-    ) -> None:
+    def test_tools_are_registered_under_the_configured_name(self, tmp_path: Path) -> None:
         """The server name is configuration — a standalone tool must not
         assume another product's identity."""
         fs = ForgeSearch(
@@ -76,9 +74,7 @@ class TestToolRegistration:
 
 class TestSearching:
     def test_searches_all_roots_by_default(self, search: ForgeSearch) -> None:
-        result = search._search(
-            "validate_token", project=None, top_k=10, doc_only=False
-        )
+        result = search._search("validate_token", project=None, top_k=10, doc_only=False)
         assert {r["project"] for r in result["results"]} == {"alpha", "beta"}
 
     def test_project_filter_restricts(self, search: ForgeSearch) -> None:
@@ -106,16 +102,12 @@ class TestSearching:
         assert paths == {"guide.md"}, f"non-prose leaked into search_docs: {paths}"
 
     def test_results_are_ranked_descending(self, search: ForgeSearch) -> None:
-        result = search._search(
-            "validate_token", project=None, top_k=10, doc_only=False
-        )
+        result = search._search("validate_token", project=None, top_k=10, doc_only=False)
         scores = [r["score"] for r in result["results"]]
         assert scores == sorted(scores, reverse=True)
 
     def test_paths_returned_are_relative(self, search: ForgeSearch) -> None:
-        result = search._search(
-            "validate_token", project=None, top_k=10, doc_only=False
-        )
+        result = search._search("validate_token", project=None, top_k=10, doc_only=False)
         assert all(not r["path"].startswith("/") for r in result["results"])
 
 
@@ -149,9 +141,7 @@ class TestErrorsStayLoud:
             )
 
     def test_genuine_miss_returns_empty_results(self, search: ForgeSearch) -> None:
-        result = search._search(
-            "nothinglikethis", project=None, top_k=10, doc_only=False
-        )
+        result = search._search("nothinglikethis", project=None, top_k=10, doc_only=False)
         assert result["results"] == []
         assert result["degraded"] is None
 
@@ -175,13 +165,9 @@ class TestFreshness:
         assert result["results"], "an edit was invisible until an explicit reindex"
         assert result["reindexed"] == ["beta"], "the auto-reindex should be reported"
 
-    def test_no_reindex_reported_when_nothing_changed(
-        self, search: ForgeSearch
-    ) -> None:
+    def test_no_reindex_reported_when_nothing_changed(self, search: ForgeSearch) -> None:
         search._search("validate_token", project=None, top_k=10, doc_only=False)
-        result = search._search(
-            "validate_token", project=None, top_k=10, doc_only=False
-        )
+        result = search._search("validate_token", project=None, top_k=10, doc_only=False)
         assert result["reindexed"] is None
 
 

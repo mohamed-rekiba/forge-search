@@ -57,8 +57,7 @@ class TestFusion:
         """A document both arms rank highly should outrank one only a single
         arm likes — the entire point of fusing."""
         fused = [
-            key
-            for key, _ in fuse(lexical=["shared", "lex"], semantic=["shared", "sem"])
+            key for key, _ in fuse(lexical=["shared", "lex"], semantic=["shared", "sem"])
         ]
         assert fused[0] == "shared"
 

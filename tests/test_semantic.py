@@ -371,3 +371,29 @@ class TestStructuralChunking:
 
     def test_empty_text_yields_nothing(self) -> None:
         assert list(structural_chunks("", relpath="f.py")) == []
+
+
+class TestChunkerDefault:
+    """The default chunker is set by measurement, not by citation.
+
+    Structure-aware chunking is implemented, tested, and NOT the default,
+    because it measured 12.5 points worse on this corpus than line windows
+    with breadcrumbs — the opposite of what the peer-reviewed source
+    predicted. This test exists so the default cannot drift back on the
+    strength of the citation alone.
+    """
+
+    def test_structural_chunking_is_off_by_default(self) -> None:
+        from forge_search.core.semantic import USE_STRUCTURAL_CHUNKING
+
+        assert USE_STRUCTURAL_CHUNKING is False, (
+            "structural chunking measured WORSE here (75.0% vs 87.5% semantic "
+            "recall). Re-measure before flipping this — do not flip it because "
+            "a paper says structure-aware chunking wins on a different corpus."
+        )
+
+    def test_structural_chunking_still_works_when_enabled(self) -> None:
+        """Kept working so the decision stays reversible on new evidence."""
+        code = "def alpha():\n    pass\n\n\ndef beta():\n    pass\n"
+        chunks = list(structural_chunks(code, relpath="m.py"))
+        assert chunks

@@ -150,10 +150,6 @@ def discover_roots(
 
     git_root = _walk_up(start, lambda p: (p / ".git").exists())
     if git_root is not None:
-        return Discovery(
-            DiscoveryLayer.GIT, (Root(label=git_root.name, path=git_root),)
-        )
+        return Discovery(DiscoveryLayer.GIT, (Root(label=git_root.name, path=git_root),))
 
-    return Discovery(
-        DiscoveryLayer.CWD, (Root(label=start.name or "root", path=start),)
-    )
+    return Discovery(DiscoveryLayer.CWD, (Root(label=start.name or "root", path=start),))
