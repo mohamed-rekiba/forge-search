@@ -127,3 +127,49 @@ class TestExcerpt:
         result = excerpt(line, 6, len(needle), width=150)
 
         assert "N" * 150 in result
+
+
+class TestRootNormalisation:
+    """A Root must be usable however it was constructed.
+
+    Found by a clean-machine install test: a Root built from a RELATIVE path
+    broke every search with "not in the subpath of". Traversal resolves the
+    root internally and yields absolute paths, while `relative_to()` compared
+    against the unresolved original. Every in-repo fixture uses `tmp_path`,
+    which is already absolute — so no existing test could reach this.
+    """
+
+    def test_relative_path_is_resolved(self, tmp_path: Path, monkeypatch) -> None:
+        from forge_search.core.roots import Root
+
+        (tmp_path / "proj").mkdir()
+        monkeypatch.chdir(tmp_path)
+
+        root = Root(label="proj", path=Path("proj"))
+
+        assert root.path.is_absolute()
+        assert root.path == (tmp_path / "proj").resolve()
+
+    def test_search_works_from_a_relative_root(self, tmp_path: Path, monkeypatch) -> None:
+        """End-to-end: the failure the clean-install test actually hit."""
+        from forge_search.core.index import LexicalIndex
+        from forge_search.core.roots import Root
+
+        monkeypatch.setenv("FORGE_SEARCH_CACHE_DIR", str(tmp_path / "cache"))
+        (tmp_path / "proj").mkdir()
+        (tmp_path / "proj" / "app.py").write_text("def charge_customer():\n    pass\n")
+        monkeypatch.chdir(tmp_path)
+
+        with LexicalIndex(Root(label="proj", path=Path("proj"))) as idx:
+            idx.reindex()
+            hits = idx.search("charge_customer")
+
+        assert hits and hits[0].path == "app.py"
+
+    def test_user_home_is_expanded(self, tmp_path: Path, monkeypatch) -> None:
+        from forge_search.core.roots import Root
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        (tmp_path / "code").mkdir()
+
+        assert Root(label="code", path=Path("~/code")).path == (tmp_path / "code").resolve()

@@ -50,6 +50,14 @@ class Root:
                 f"root label must not be an absolute path (got {self.label!r}); "
                 "labels are returned to callers and must stay portable"
             )
+        # Normalise the path to resolved-absolute at construction, so every
+        # consumer can rely on it. Without this, a Root built from a relative
+        # path breaks: traversal resolves internally and yields absolute
+        # paths, while `relative_to()` compares against the unresolved
+        # original and raises. Found by a clean-machine install test — the
+        # in-repo fixtures all use tmp_path, which is already absolute, so
+        # nothing else could reach it.
+        object.__setattr__(self, "path", Path(self.path).expanduser().resolve())
 
 
 class RootProvider:
