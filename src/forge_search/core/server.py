@@ -38,6 +38,7 @@ from .fusion import ArmWeights
 from .hybrid import HybridIndex, SearchMode
 from .index import Hit
 from .query import QueryError
+from .rerank import Reranker
 from .roots import Root
 from .traversal import TraversalConfig
 
@@ -67,6 +68,8 @@ class ForgeSearch:
     #: means lexical-only, which is a supported configuration rather than a
     #: degraded one.
     embedder: Embedder | None = None
+    #: Optional final ranking stage. Absent, fused order stands.
+    reranker: Reranker | None = None
     weights: ArmWeights = field(default_factory=ArmWeights)
     mode: str = SearchMode.HYBRID
     _indexes: dict[str, HybridIndex] = field(default_factory=dict, init=False)
@@ -79,6 +82,7 @@ class ForgeSearch:
             index = HybridIndex(
                 root,
                 embedder=self.embedder,
+                reranker=self.reranker,
                 config=self.config,
                 weights=self.weights,
             )

@@ -3,8 +3,11 @@
 **Yes.** Hybrid finds **87.5%** where lexical alone finds 25%.
 
 **Corpus:** 718 files, ~110k lines, markdown + shell + TypeScript.
-**Model:** `all-MiniLM-L6-v2`, ONNX, 384-dim, CPU. **Queries:** 8, six of them
-deliberately conceptual. **`top_k`:** 10.
+**Model:** `all-MiniLM-L6-v2`, ONNX, 384-dim, CPU. **`top_k`:** 10.
+**Queries:** `bench/apexyard.txt` — 26, mostly conceptual. The headline row
+below is the original 8-query run; the 26-query numbers appear under
+reranking. Absolute recall differs between fixtures (the expanded set is
+harder); only same-fixture comparisons mean anything.
 
 ## Current result
 
@@ -45,10 +48,10 @@ file. Prepending location is the deterministic, no-LLM form of *contextual
 retrieval* — the published technique generates per-chunk context with an LLM
 and reports a 35–49% reduction in retrieval failures.
 
-## Two priors that lost to measurement
+## Three priors that lost to measurement
 
-Both are implemented, tested, and **off by default**, with tests pinning the
-default so they cannot drift back on the strength of the citation alone.
+All three are implemented, tested, and **off by default**, with tests pinning
+the default so they cannot drift back on the strength of the citation alone.
 
 ### Retrieval-tuned model vs symmetric model
 
@@ -79,12 +82,58 @@ mostly prose and shell rather than the application code cAST benchmarked;
 regex boundaries are cruder than a real AST; variable-size regions may interact
 badly with a fixed `top_k`. Available via `USE_STRUCTURAL_CHUNKING`.
 
+### Cross-encoder reranking
+
+The largest single-stage gain in the retrieval literature — commonly reported
+as a 30–50% reduction in the failures that survive hybrid search. A bi-encoder
+never sees query and document together; a cross-encoder scores the pair
+jointly, so it should judge relevance better. It is the one result here that
+was expected to be uncontroversial.
+
+Measured on 26 queries with `ms-marco-MiniLM-L-6-v2` (ONNX, CPU), reranking
+the fused top-30:
+
+```text
+mode        recall (off → on)     p50 ms (off → on)
+lexical     11.5%  →  11.5%          0.6  →   0.2
+semantic    50.0%  →  50.0%          5.2  →  61.9
+hybrid      57.7%  →  50.0%          6.6  →  59.5
+```
+
+**It lost.** Neutral on both single arms, and it actively *demoted* two correct
+answers that RRF had already placed in the hybrid top 10 — at roughly 10× the
+latency. The plausible reading, unverified: RRF over two arms is already a
+strong ranker here, and a cross-encoder judging a one-line excerpt through a
+256-token window has strictly less information to work with than the fusion
+step it is overruling. On longer chunks, or a weaker first stage, the prior may
+well hold.
+
+Two things went wrong on the way to that number, and both were invisible:
+
+- **Fusion truncated to `limit` before reranking.** The reranker was handed the
+  ten results it was about to return, so recall@10 could not move by
+  construction — while the full latency was still paid. The first "no effect"
+  reading was this bug, not a finding. Fixed; pinned by a test.
+- **A path-prefix variant was tuned on 8 queries.** Prefixing each excerpt with
+  its path swung lexical +12.5 and semantic −25 points — which read as a real
+  effect and got a branch, a docstring, and a rationale. At 26 queries all
+  three variants scored *identically*: it was one or two queries flipping.
+  The branch was deleted. **A 12.5-point swing on an 8-query fixture is noise
+  wearing a finding's clothes**, and it is why the fixture is now 26 queries in
+  version control (`bench/apexyard.txt`) instead of a line of shell history.
+
+Available via `--rerank`.
+
 ## Honest limits
 
-- **8 queries.** The 87.5% vs 25% gap is large and consistent. The 25- and
-  12.5-point deltas above are two- and one-query differences — directional, not
-  conclusive. Neither prior reproduced here, which is enough to not override a
-  local measurement; it is not enough to claim the priors are wrong in general.
+- **26 queries.** One query flipping is 3.8 points, so anything under ~8 points
+  is not a finding. It was 8 queries until a 12.5-point "effect" turned out to
+  be one query moving — see the reranking section. The fixture lives at
+  `bench/apexyard.txt`; a benchmark you cannot re-run is an anecdote.
+- **Three priors failed to reproduce here.** That is enough to not override a
+  local measurement. It is not enough to claim the priors are wrong in general,
+  and one corpus of prose and shell is exactly where you should expect
+  code-retrieval results to travel badly.
 - **Expected answers are one person's judgement.** Several queries have more
   than one defensible target, so absolute recall understates every mode. The
   *comparison between modes* is the finding.
@@ -112,7 +161,10 @@ suspicious enough to keep digging rather than publish as a verdict.
 ```bash
 forge-search warm
 forge-search bench --root /abs/path --semantic --top-k 10 \
-  --query "how do I know if a merge is allowed::.claude/rules/pr-workflow.md" \
+  --fixture bench/apexyard.txt
+
+# or ad-hoc, without a fixture file:
+forge-search bench --root /abs/path --semantic \
   --query "what stops me committing secrets::.claude/hooks/check-secrets.sh"
 ```
 

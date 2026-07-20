@@ -25,7 +25,18 @@ from pathlib import Path
 
 from .cache import cache_root
 
-__all__ = ["ModelSpec", "DEFAULT_MODEL", "model_dir", "is_present", "download"]
+__all__ = [
+    "ModelSpec",
+    "DEFAULT_MODEL",
+    "DEFAULT_RERANKER",
+    "MODELS",
+    "RERANKERS",
+    "resolve_model",
+    "resolve_reranker",
+    "model_dir",
+    "is_present",
+    "download",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +95,30 @@ MODELS: dict[str, ModelSpec] = {
 }
 
 DEFAULT_MODEL = MODELS["all-minilm"]
+
+#: Cross-encoder rerankers. A bi-encoder embeds query and document
+#: independently, so it never sees them together; a cross-encoder scores the
+#: pair jointly and is markedly better at judging relevance. The cost is that
+#: it cannot be precomputed — every candidate needs an inference pass — which
+#: is why it reranks a short list rather than searching.
+#:
+#: Cheap here specifically: reranking cost scales with candidates scored, not
+#: corpus size, and this scores ~20-50 short candidates on CPU.
+RERANKERS: dict[str, ModelSpec] = {
+    "ms-marco-minilm": _hf("Xenova/ms-marco-MiniLM-L-6-v2", dim=1),
+}
+
+DEFAULT_RERANKER = RERANKERS["ms-marco-minilm"]
+
+
+def resolve_reranker(name: str | None) -> ModelSpec:
+    """Look up a reranker by short name."""
+    if not name:
+        return DEFAULT_RERANKER
+    if name not in RERANKERS:
+        known = ", ".join(sorted(RERANKERS))
+        raise KeyError(f"unknown reranker {name!r}; known: {known}")
+    return RERANKERS[name]
 
 
 def resolve_model(name: str | None) -> ModelSpec:

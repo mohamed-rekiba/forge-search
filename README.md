@@ -231,6 +231,13 @@ run reported 0%. See [BENCHMARK.md](BENCHMARK.md) for the full progression, two
 well-supported priors that lost to local measurement, and the limits of an
 8-query fixture.
 
+**Cross-encoder reranking** is implemented (`--rerank`, after
+`forge-search warm --reranker`) and **off by default because it lost** — the
+largest reported single-stage gain in the literature was neutral on both arms
+here and cost hybrid 7.7 points at 10× the latency. Two priors before it lost
+the same way. Try it on your corpus; the flag is there precisely because these
+results are corpus-specific.
+
 `verdict()` will say *"pure overhead — remove the arm"* and *"hybrid is WORSE
 than lexical"* as readily as the opposite. If it says the semantic arm earns
 nothing on your corpus, set `ArmWeights(semantic=0.0)` — no release needed —
@@ -264,7 +271,7 @@ deliberate. Substring search over such content would need a trigram index.
 
 ```text
 core/       generic. No knowledge of any integration.
-  roots      layered discovery + the RootProvider seam
+  roots      explicit roots + the RootProvider seam; nothing discovered
   traversal  the four defects, fixed as defaults
   cache      per-root index paths, no absolute path ever persisted
   index      FTS5 content + filename matching, incremental, schema-versioned
@@ -273,10 +280,11 @@ core/       generic. No knowledge of any integration.
   semantic   chunking + sqlite-vec, importable only when installed
   fusion     RRF; degrades to exactly the lexical order when an arm is empty
   hybrid     composes both arms so neither imports the other
-  bench      the measurement that judges the semantic arm
+  rerank     optional cross-encoder final stage; off by default (it lost)
+  bench      the measurement that judges every optional stage
   model      explicit model fetch; separate so embedding never imports network
   server     the MCP tool surface
-adapters/   integration-specific root providers, loaded only when detected
+adapters/   integration-specific root expanders, named with --adapter, never detected
 ```
 
 Integrations supply roots through `RootProvider` and nothing else. The seam is
@@ -288,7 +296,7 @@ the code.
 
 ```bash
 uv sync
-uv run pytest                    # 150 tests, lexical-only
+uv run pytest                    # 185 tests, lexical-only
 uv run --extra semantic pytest   # same suite with the semantic arm
 ```
 

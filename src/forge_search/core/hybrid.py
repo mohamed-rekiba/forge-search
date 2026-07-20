@@ -14,12 +14,13 @@ and not the other.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .embedding import Embedder
 from .fusion import ArmWeights, fuse
 from .index import Hit, IndexStats, LexicalIndex
+from .rerank import Reranker, rerank
 from .roots import Root
 from .semantic import SemanticIndex, vec_available
 from .traversal import TraversalConfig
@@ -49,6 +50,8 @@ class HybridIndex:
     embedder: Embedder | None = None
     config: TraversalConfig = field(default_factory=TraversalConfig)
     weights: ArmWeights = field(default_factory=ArmWeights)
+    #: Optional final stage. Absent, results keep their fused order.
+    reranker: Reranker | None = None
 
     _lexical: LexicalIndex = field(init=False)
     _semantic: SemanticIndex | None = field(init=False, default=None)
@@ -141,13 +144,21 @@ class HybridIndex:
         Asking explicitly for `semantic` when it is absent returns nothing,
         which is honest: the caller asked for an arm that is not there.
         """
+        # Reranking is orthogonal to which arms exist, so every path below
+        # ends in _rerank(). Applying it only on the hybrid path would mean a
+        # lexical-only install silently ignored `--rerank` — the exact shape
+        # of silent gap this project exists to remove.
         if mode == SearchMode.LEXICAL or self._semantic is None:
             if mode == SearchMode.SEMANTIC and self._semantic is None:
                 return []
-            return self._lexical.search(query, limit=limit)
+            # Over-fetch so the reranker has candidates to promote; without a
+            # reranker this slices straight back to `limit`.
+            depth = limit * 3 if self.reranker else limit
+            return self._rerank(query, self._lexical.search(query, limit=depth), limit)
 
         if mode == SearchMode.SEMANTIC:
-            return self._semantic_hits(query, limit)
+            depth = limit * 3 if self.reranker else limit
+            return self._rerank(query, self._semantic_hits(query, depth), limit)
 
         # Hybrid: over-fetch each arm so fusion has candidates to reorder.
         # Fusing two already-truncated top-10 lists would mostly reproduce
@@ -160,23 +171,49 @@ class HybridIndex:
         for hit in (*lexical_hits, *semantic_hits):
             by_key.setdefault(_key(hit), hit)
 
+        # Fuse to `depth`, not `limit`, when reranking: the reranker's whole
+        # value is promoting a candidate the first stage ranked too low, and
+        # it cannot promote what fusion already discarded. Truncating first
+        # makes reranking a no-op on recall — reordering ten results cannot
+        # change recall@10 — while still paying its full latency.
         fused = fuse(
             lexical=[_key(h) for h in lexical_hits],
             semantic=[_key(h) for h in semantic_hits],
             weights=self.weights,
-            limit=limit,
+            limit=depth if self.reranker else limit,
         )
+        return self._rerank(
+            query,
+            [
+                # Replace the arm-local score with the fused one, so a caller
+                # sorting by score gets the fused order, not BM25's.
+                replace(by_key[key], score=round(score, 6))
+                for key, score in fused
+                if key in by_key
+            ],
+            limit,
+        )
+
+    def _rerank(self, query: str, hits: list[Hit], limit: int) -> list[Hit]:
+        """Final ranking stage, then truncate to `limit`.
+
+        The cross-encoder sees query and candidate together, which neither arm
+        can — the bi-encoder embeds them separately and BM25 never models the
+        query at all. With no reranker (the default) this is just truncation.
+
+        Off by default because it **lost** on this corpus: hybrid recall fell
+        57.7% → 50.0% at 10× the latency. A variant that prefixed the path to
+        each excerpt was tried and measured identically, so that branch was
+        deleted rather than kept as a knob. See BENCHMARK.md.
+        """
+        reordered = rerank(query, [(_key(h), h.excerpt) for h in hits], self.reranker)
+        if reordered is None:
+            return hits[:limit]
+
+        by_key = {_key(h): h for h in hits}
         return [
-            # Replace the arm-local score with the fused one so a caller
-            # sorting by score gets the fused order, not BM25's.
-            Hit(
-                project=by_key[key].project,
-                path=by_key[key].path,
-                line=by_key[key].line,
-                excerpt=by_key[key].excerpt,
-                score=round(score, 6),
-            )
-            for key, score in fused
+            replace(by_key[key], score=round(score, 6))
+            for key, score in reordered[:limit]
             if key in by_key
         ]
 
