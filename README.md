@@ -53,9 +53,9 @@ wheels for cp314.
 
 ```bash
 # One-shot search — the fastest way to check it behaves
-forge-search search "validate_token"
+forge-search search "validate_token" --root /abs/path/to/project
 forge-search search "require-active-ticket" --root api=~/code/api --top-k 5
-forge-search search "authentication" --docs        # prose only
+forge-search search "authentication" --root ~/code/api --docs   # prose only
 
 # Build indexes without serving
 forge-search index --root api=~/code/api
@@ -64,13 +64,21 @@ forge-search index --root api=~/code/api
 forge-search serve --root api=~/code/api
 ```
 
-With no `--root`, roots are discovered by walking up from the current
-directory. How they were chosen is always printed to stderr — a wrong guess
-that stays silent is the failure mode.
+**`--root` is required. Nothing is discovered.**
+
+There is no walk-up, no working-directory inference, no marker sniffing, and
+no fallback guess. Your editor already knows the project path and substitutes
+it at launch; inferring it would solve a problem that is already solved, and
+inferring it *wrongly* is silent — the wrong tree gets indexed and every
+search returns plausible results from somewhere you did not ask about.
+
+Omitting `--root` prints the three correct forms rather than picking one.
 
 ## Register with an MCP client
 
-Add to `.mcp.json` in your project:
+Add to `.mcp.json` in your project. `${workspaceFolder}` is substituted by the
+editor at launch, so it is always the current project and can never go stale
+the way a written-in absolute path can:
 
 ```json
 {
@@ -78,10 +86,19 @@ Add to `.mcp.json` in your project:
     "forge-search": {
       "type": "stdio",
       "command": "forge-search",
-      "args": ["serve", "--root", "myproject=."]
+      "args": ["serve", "--root", "${workspaceFolder}"]
     }
   }
 }
+```
+
+Outside an editor, use an absolute path. Several roots are fine — repeat
+`--root`, optionally labelling each:
+
+```json
+"args": ["serve",
+         "--root", "api=/abs/path/api",
+         "--root", "web=/abs/path/web"]
 ```
 
 Tools then appear as `mcp__forge-search__search_code`, `…__search_docs`, and
@@ -90,6 +107,28 @@ Tools then appear as `mcp__forge-search__search_code`, `…__search_docs`, and
 The server name is configurable (`--name`). It defaults to `forge-search` and
 should stay that way unless you have a specific reason: registering under
 another product's name collides with it wherever both are installed.
+
+## Portfolio adapters
+
+Some projects are really *several* projects — a parent repo with managed
+project clones underneath it. Search finds those files either way, since the
+subdirectories are traversed like any others. What an adapter adds is
+**per-project labels**, which is what makes `project="name"` filtering work
+and keeps result paths relative to each project rather than to the parent.
+
+```bash
+forge-search serve --root ws=${workspaceFolder} --adapter apexyard
+# → apexyard expanded ws into 4
+```
+
+**Adapters are named, never detected.** An adapter that enables itself because
+it spotted a marker file can fire when you did not want it and stay quiet when
+you did — both invisibly. Naming it costs one flag and removes the failure
+class. Any expansion is reported, because turning one root into several is
+more than you literally asked for.
+
+An adapter that finds nothing to expand keeps the root unchanged, so naming
+one can never make a search cover *less* than requested.
 
 ## Transport
 
@@ -170,14 +209,15 @@ forge-search bench --semantic \
   --query "how sessions expire::docs/sessions.md"
 ```
 
-```
+```text
 mode         recall      chars    p50 ms    p95 ms
-lexical     100.0%      3,184       0.3       0.5
-hybrid      100.0%      3,184       0.2       0.4
+lexical      25.0%        717       1.4       7.5
+semantic     87.5%      2,651       4.8       6.9
+hybrid       87.5%      2,774       6.0       8.0
 
 Verdict:
-  Hybrid and lexical are within 0.0% on answer-recall. The semantic arm is
-  not earning its cost on this corpus…
+  Hybrid improves answer-recall by 62.5% over lexical alone. The semantic
+  arm earns its cost here.
 ```
 
 Each query names the file that *should* be found. That is not optional:
@@ -185,11 +225,11 @@ token counts are trivially improved by returning less, so a mode that halves
 its output by dropping the answer has not won. Every comparison is at **equal
 answer-recall**.
 
-**It has already been run on a real corpus, and the answer was unflattering:**
-with a verified-working MiniLM model and 16,726 indexed chunks, the semantic
-arm scored **0% recall** across 8 queries — six of them written specifically to
-favour it. See [BENCHMARK.md](BENCHMARK.md) for the full result and its limits.
-The arm is opt-in (`--semantic`), so the default already reflects that finding.
+**It has been run on a real corpus.** The semantic arm finds **87.5%** where
+lexical alone finds 25% — but it took two bug fixes to get there, and the first
+run reported 0%. See [BENCHMARK.md](BENCHMARK.md) for the full progression, two
+well-supported priors that lost to local measurement, and the limits of an
+8-query fixture.
 
 `verdict()` will say *"pure overhead — remove the arm"* and *"hybrid is WORSE
 than lexical"* as readily as the opposite. If it says the semantic arm earns
@@ -222,7 +262,7 @@ deliberate. Substring search over such content would need a trigram index.
 
 ## Architecture
 
-```
+```text
 core/       generic. No knowledge of any integration.
   roots      layered discovery + the RootProvider seam
   traversal  the four defects, fixed as defaults

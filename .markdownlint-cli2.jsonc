@@ -1,0 +1,10 @@
+{
+  // MD013 (line length): several tables carry a full sentence of measured
+  // context per row, which is the point of them. A table cell cannot wrap, so
+  // the rule and the table are in permanent conflict.
+  // MD060 (table column style): purely cosmetic pipe spacing.
+  "config": {
+    "MD013": false,
+    "MD060": false
+  }
+}
