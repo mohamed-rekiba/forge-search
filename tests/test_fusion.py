@@ -56,7 +56,10 @@ class TestFusion:
     def test_agreement_ranks_first(self) -> None:
         """A document both arms rank highly should outrank one only a single
         arm likes — the entire point of fusing."""
-        fused = [key for key, _ in fuse(lexical=["shared", "lex"], semantic=["shared", "sem"])]
+        fused = [
+            key
+            for key, _ in fuse(lexical=["shared", "lex"], semantic=["shared", "sem"])
+        ]
         assert fused[0] == "shared"
 
     def test_documents_unique_to_one_arm_still_appear(self) -> None:

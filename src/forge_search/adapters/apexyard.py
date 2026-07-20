@@ -109,7 +109,7 @@ def _resolve_portfolio_paths(ops_root: Path) -> tuple[Path | None, Path]:
 
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         # A malformed config must not take the whole provider down. Falling
         # back to single-fork layout is the conservative choice: worst case
         # some roots are missed, and discovery reports what it did find.
@@ -153,7 +153,7 @@ def _registered_project_names(registry: Path) -> list[str]:
         stripped = line.strip()
         if not stripped.startswith("- name:"):
             continue
-        value = stripped[len("- name:"):].strip()
+        value = stripped[len("- name:") :].strip()
         if value.startswith("#") or not value:
             continue
         value = value.split("#", 1)[0].strip()  # trailing comment

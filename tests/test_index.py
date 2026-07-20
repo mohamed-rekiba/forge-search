@@ -89,7 +89,9 @@ class TestStaleness:
     def test_modified_file_marks_stale(self, repo: Root) -> None:
         with LexicalIndex(repo) as idx:
             idx.reindex()
-            (repo.path / "src" / "auth.py").write_text("def totally_different():\n    pass\n")
+            (repo.path / "src" / "auth.py").write_text(
+                "def totally_different():\n    pass\n"
+            )
             assert idx.is_stale(), "a changed file must be detected, or searches lie"
 
     def test_new_file_marks_stale(self, repo: Root) -> None:
@@ -118,11 +120,15 @@ class TestStaleness:
     def test_reindex_picks_up_edits(self, repo: Root) -> None:
         with LexicalIndex(repo) as idx:
             idx.reindex()
-            (repo.path / "src" / "auth.py").write_text("def refresh_session():\n    pass\n")
+            (repo.path / "src" / "auth.py").write_text(
+                "def refresh_session():\n    pass\n"
+            )
             idx.reindex()
 
             assert idx.search("refresh_session")
-            assert not [h for h in idx.search("validate_token") if h.path == "src/auth.py"]
+            assert not [
+                h for h in idx.search("validate_token") if h.path == "src/auth.py"
+            ]
 
 
 class TestQuerying:
@@ -184,7 +190,9 @@ class TestQuerying:
         """
         src = tmp_path / "minified"
         src.mkdir()
-        (src / "bundle.js").write_text("var a=" + ("z" * 400) + "NEEDLE" + ("z" * 400) + ";\n")
+        (src / "bundle.js").write_text(
+            "var a=" + ("z" * 400) + "NEEDLE" + ("z" * 400) + ";\n"
+        )
 
         with LexicalIndex(Root(label="minified", path=src)) as idx:
             idx.reindex()
@@ -218,7 +226,9 @@ class TestPathMatching:
             "contains — this is what the paths table exists for"
         )
 
-    def test_path_match_outranks_incidental_content_mentions(self, tmp_path: Path) -> None:
+    def test_path_match_outranks_incidental_content_mentions(
+        self, tmp_path: Path
+    ) -> None:
         """Someone searching a filename wants the file, not the fixtures that
         happen to reference it."""
         src = tmp_path / "repo"
@@ -272,8 +282,10 @@ class TestSchemaVersioning:
 
         # Simulate an index written by an older schema.
         conn = sqlite3.connect(db_path)
-        conn.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'",
-                     (str(SCHEMA_VERSION - 1),))
+        conn.execute(
+            "UPDATE meta SET value = ? WHERE key = 'schema_version'",
+            (str(SCHEMA_VERSION - 1),),
+        )
         conn.commit()
         conn.close()
 

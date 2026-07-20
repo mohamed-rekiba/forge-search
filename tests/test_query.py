@@ -45,15 +45,17 @@ class TestHyphenRegression:
     @pytest.mark.parametrize(
         "query",
         [
-            "require-active-ticket",   # hyphens — the original bug
-            "core/index.py",           # a path
-            "forge_search.core",       # dotted module
-            "Root.label",              # attribute access
-            "search_code(query)",      # a call, parens are FTS5 syntax
-            "a:b",                     # colon — column separator in FTS5
+            "require-active-ticket",  # hyphens — the original bug
+            "core/index.py",  # a path
+            "forge_search.core",  # dotted module
+            "Root.label",  # attribute access
+            "search_code(query)",  # a call, parens are FTS5 syntax
+            "a:b",  # colon — column separator in FTS5
         ],
     )
-    def test_punctuation_heavy_queries_do_not_raise(self, query: str, tmp_path: Path) -> None:
+    def test_punctuation_heavy_queries_do_not_raise(
+        self, query: str, tmp_path: Path
+    ) -> None:
         """Every one of these is a plausible search that FTS5 would choke on raw."""
         src = tmp_path / "repo"
         src.mkdir()
@@ -65,7 +67,7 @@ class TestHyphenRegression:
 
 
 class TestErrorsAreNotEmptyResults:
-    """"Found nothing" and "could not search" must never look alike."""
+    """ "Found nothing" and "could not search" must never look alike."""
 
     def test_empty_query_raises(self) -> None:
         with pytest.raises(QueryError):
@@ -105,7 +107,10 @@ class TestTranslation:
         assert to_fts5("validate token") == "validate token"
 
     def test_mixed_terms_quote_only_what_needs_it(self) -> None:
-        assert to_fts5("validate require-active-ticket") == 'validate "require-active-ticket"'
+        assert (
+            to_fts5("validate require-active-ticket")
+            == 'validate "require-active-ticket"'
+        )
 
     def test_embedded_quote_is_escaped(self) -> None:
         """An unescaped quote would terminate the phrase and change the query."""

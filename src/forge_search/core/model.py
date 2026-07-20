@@ -73,7 +73,9 @@ def is_present(spec: ModelSpec = DEFAULT_MODEL) -> bool:
     return all((directory / name).is_file() for name in spec.files)
 
 
-def download(spec: ModelSpec = DEFAULT_MODEL, *, force: bool = False, progress=print) -> Path:
+def download(
+    spec: ModelSpec = DEFAULT_MODEL, *, force: bool = False, progress=print
+) -> Path:
     """Fetch the model, returning its directory.
 
     Each file downloads to a temporary path and is moved into place only on

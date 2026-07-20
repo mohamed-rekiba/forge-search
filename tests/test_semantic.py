@@ -17,7 +17,12 @@ from pathlib import Path
 
 import pytest
 
-from forge_search.core.embedding import DEFAULT_DIM, HashingEmbedder, deserialize, serialize
+from forge_search.core.embedding import (
+    DEFAULT_DIM,
+    HashingEmbedder,
+    deserialize,
+    serialize,
+)
 from forge_search.core.semantic import (
     CHUNK_LINES,
     CHUNK_OVERLAP,
@@ -112,7 +117,9 @@ class TestSemanticIndex:
             yield idx
 
     def test_indexes_and_retrieves(self, index: SemanticIndex) -> None:
-        index.index_file("auth.py", "def validate_token(token):\n    return decode(token)\n")
+        index.index_file(
+            "auth.py", "def validate_token(token):\n    return decode(token)\n"
+        )
         index.commit()
 
         hits = index.search("validate_token", limit=5)
@@ -157,7 +164,9 @@ class TestSemanticIndex:
         index.drop_file("drop.py")
         index.commit()
 
-        assert {relpath for relpath, _, _ in index.search("def", limit=10)} == {"keep.py"}
+        assert {relpath for relpath, _, _ in index.search("def", limit=10)} == {
+            "keep.py"
+        }
 
     def test_empty_file_indexes_nothing(self, index: SemanticIndex) -> None:
         assert index.index_file("empty.py", "") == 0

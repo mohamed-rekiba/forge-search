@@ -11,13 +11,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 
 from forge_search.adapters.apexyard import MARKER, ApexyardRootProvider
 from forge_search.core.roots import DiscoveryLayer, discover_roots
 
 
-def _make_fork(base: Path, projects: list[str], *, clone: list[str] | None = None) -> Path:
+def _make_fork(
+    base: Path, projects: list[str], *, clone: list[str] | None = None
+) -> Path:
     """Build a minimal ops fork with a registry and optional clones."""
     fork = base / "ops"
     (fork / "workspace").mkdir(parents=True)
@@ -59,7 +60,9 @@ class TestRoots:
 
         assert {r.label for r in provider.roots()} == {".", "alpha", "beta"}
 
-    def test_registered_project_without_a_clone_is_skipped(self, tmp_path: Path) -> None:
+    def test_registered_project_without_a_clone_is_skipped(
+        self, tmp_path: Path
+    ) -> None:
         """A partially-cloned portfolio is normal, not an error state."""
         fork = _make_fork(tmp_path, ["alpha", "beta"], clone=["alpha"])
         provider = ApexyardRootProvider()
@@ -98,7 +101,7 @@ class TestRoots:
         workspace — a wrong root returns confident results from the wrong place."""
         fork = _make_fork(tmp_path, [])
         (fork / "apexyard.projects.yaml").write_text(
-            'version: 1\nprojects:\n  - name: ../../etc\n  - name: ..\n'
+            "version: 1\nprojects:\n  - name: ../../etc\n  - name: ..\n"
         )
         provider = ApexyardRootProvider()
         provider.matches(fork)
@@ -107,7 +110,9 @@ class TestRoots:
 
 
 class TestSplitPortfolio:
-    def test_registry_and_workspace_can_live_in_a_sibling_repo(self, tmp_path: Path) -> None:
+    def test_registry_and_workspace_can_live_in_a_sibling_repo(
+        self, tmp_path: Path
+    ) -> None:
         fork = tmp_path / "ops"
         fork.mkdir()
         (fork / MARKER).write_text("")
@@ -135,7 +140,9 @@ class TestSplitPortfolio:
 
         assert {r.label for r in provider.roots()} == {".", "gamma"}
 
-    def test_malformed_config_falls_back_instead_of_crashing(self, tmp_path: Path) -> None:
+    def test_malformed_config_falls_back_instead_of_crashing(
+        self, tmp_path: Path
+    ) -> None:
         fork = _make_fork(tmp_path, ["alpha"])
         (fork / ".claude").mkdir(exist_ok=True)
         (fork / ".claude" / "project-config.json").write_text("{not valid json")

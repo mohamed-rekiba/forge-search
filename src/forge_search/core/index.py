@@ -20,7 +20,6 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
 from .cache import index_path_for
 from .query import QueryError, to_fts5
@@ -184,7 +183,9 @@ class LexicalIndex:
         return found
 
     def _indexed_files(self) -> dict[str, tuple[int, int]]:
-        rows = self._conn.execute("SELECT relpath, size, mtime_ns FROM files").fetchall()
+        rows = self._conn.execute(
+            "SELECT relpath, size, mtime_ns FROM files"
+        ).fetchall()
         return {r[0]: (r[1], r[2]) for r in rows}
 
     def is_stale(self) -> bool:
@@ -203,7 +204,9 @@ class LexicalIndex:
     def indexed_relpaths(self) -> list[str]:
         """Every indexed relpath. Used to backfill a companion index that was
         added after this one was already populated."""
-        return [r[0] for r in self._conn.execute("SELECT relpath FROM files").fetchall()]
+        return [
+            r[0] for r in self._conn.execute("SELECT relpath FROM files").fetchall()
+        ]
 
     def pending_changes(self, *, force: bool = False) -> tuple[list[str], list[str]]:
         """Return ``(changed, removed)`` relpaths without applying anything.
@@ -383,7 +386,9 @@ def _match_span(body: str, query: str) -> tuple[int, int]:
     return 0, 0
 
 
-def open_indexes(roots: Sequence[Root], config: TraversalConfig | None = None) -> Iterable[LexicalIndex]:
+def open_indexes(
+    roots: Sequence[Root], config: TraversalConfig | None = None
+) -> Iterable[LexicalIndex]:
     """Open one index per root."""
     for root in roots:
         yield LexicalIndex(root, config=config)

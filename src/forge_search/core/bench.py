@@ -155,8 +155,10 @@ def run_bench(
     as a token count.
     """
     if not queries:
-        raise ValueError("bench needs a query fixture; inventing queries here would "
-                         "let the harness flatter whichever arm it was written to favour")
+        raise ValueError(
+            "bench needs a query fixture; inventing queries here would "
+            "let the harness flatter whichever arm it was written to favour"
+        )
 
     results: dict[str, ModeResult] = {}
 

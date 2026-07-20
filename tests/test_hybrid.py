@@ -100,14 +100,18 @@ class TestHybrid:
         assert all(h.path for h in lexical + semantic)
 
     def test_hybrid_scores_are_descending(self, index: HybridIndex) -> None:
-        scores = [h.score for h in index.search("validate_token", mode=SearchMode.HYBRID)]
+        scores = [
+            h.score for h in index.search("validate_token", mode=SearchMode.HYBRID)
+        ]
         assert scores == sorted(scores, reverse=True)
 
     def test_zero_semantic_weight_matches_lexical_order(self, repo: Root) -> None:
         """The removability guarantee: weighting the arm to zero must give
         back exactly the lexical ranking, with no residual influence."""
         with HybridIndex(
-            repo, embedder=HashingEmbedder(), weights=ArmWeights(lexical=1.0, semantic=0.0)
+            repo,
+            embedder=HashingEmbedder(),
+            weights=ArmWeights(lexical=1.0, semantic=0.0),
         ) as idx:
             idx.reindex()
             hybrid = [h.path for h in idx.search("validate", mode=SearchMode.HYBRID)]
@@ -134,7 +138,9 @@ class TestArmsStayInStep:
             idx.reindex()
             yield idx
 
-    def test_deleted_file_disappears_from_both_arms(self, index: HybridIndex, repo: Root) -> None:
+    def test_deleted_file_disappears_from_both_arms(
+        self, index: HybridIndex, repo: Root
+    ) -> None:
         assert index.search("refresh_session", mode=SearchMode.SEMANTIC)
 
         (repo.path / "src" / "session.py").unlink()
@@ -147,23 +153,31 @@ class TestArmsStayInStep:
                 "content that no longer exists is worse than no hit"
             )
 
-    def test_edited_file_updates_in_both_arms(self, index: HybridIndex, repo: Root) -> None:
+    def test_edited_file_updates_in_both_arms(
+        self, index: HybridIndex, repo: Root
+    ) -> None:
         (repo.path / "src" / "auth.py").write_text(
             "def brand_new_symbol():\n    # entirely different content\n    pass\n"
         )
         index.reindex()
 
         for mode in (SearchMode.LEXICAL, SearchMode.HYBRID):
-            assert index.search("brand_new_symbol", mode=mode), f"{mode} missed the edit"
+            assert index.search("brand_new_symbol", mode=mode), (
+                f"{mode} missed the edit"
+            )
 
-    def test_new_file_appears_in_both_arms(self, index: HybridIndex, repo: Root) -> None:
+    def test_new_file_appears_in_both_arms(
+        self, index: HybridIndex, repo: Root
+    ) -> None:
         (repo.path / "src" / "added.py").write_text(
             "def freshly_added():\n    # a brand new function\n    pass\n"
         )
         index.reindex()
 
         for mode in (SearchMode.LEXICAL, SearchMode.HYBRID):
-            assert index.search("freshly_added", mode=mode), f"{mode} missed the new file"
+            assert index.search("freshly_added", mode=mode), (
+                f"{mode} missed the new file"
+            )
 
     def test_reindex_is_idempotent(self, index: HybridIndex) -> None:
         """A second reindex with no changes must not duplicate vectors."""
@@ -184,7 +198,9 @@ class TestSemanticBackfill:
     contributes nothing forever with no error.
     """
 
-    def test_semantic_backfills_onto_an_existing_lexical_index(self, repo: Root) -> None:
+    def test_semantic_backfills_onto_an_existing_lexical_index(
+        self, repo: Root
+    ) -> None:
         # First: lexical only, as an existing installation would be.
         with HybridIndex(repo) as lexical_only:
             lexical_only.reindex()

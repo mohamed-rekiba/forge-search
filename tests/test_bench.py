@@ -17,7 +17,9 @@ from forge_search.core.hybrid import HybridIndex, SearchMode
 from forge_search.core.roots import Root
 from forge_search.core.semantic import vec_available
 
-requires_vec = pytest.mark.skipif(not vec_available(), reason="sqlite-vec not installed")
+requires_vec = pytest.mark.skipif(
+    not vec_available(), reason="sqlite-vec not installed"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -29,8 +31,12 @@ def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def repo(tmp_path: Path) -> Root:
     src = tmp_path / "repo"
     (src / "src").mkdir(parents=True)
-    (src / "src" / "auth.py").write_text("def validate_token(token):\n    return decode(token)\n")
-    (src / "src" / "session.py").write_text("def refresh_session(user):\n    return issue(user)\n")
+    (src / "src" / "auth.py").write_text(
+        "def validate_token(token):\n    return decode(token)\n"
+    )
+    (src / "src" / "session.py").write_text(
+        "def refresh_session(user):\n    return issue(user)\n"
+    )
     return Root(label="repo", path=src)
 
 
@@ -94,13 +100,17 @@ class TestHarness:
 class TestVerdict:
     """The harness must be willing to reach an unflattering conclusion."""
 
-    def _report(self, lexical: float, hybrid: float, semantic: float | None = None) -> BenchReport:
+    def _report(
+        self, lexical: float, hybrid: float, semantic: float | None = None
+    ) -> BenchReport:
         results = {
             SearchMode.LEXICAL: ModeResult(SearchMode.LEXICAL, lexical, 100, [1.0]),
             SearchMode.HYBRID: ModeResult(SearchMode.HYBRID, hybrid, 100, [1.0]),
         }
         if semantic is not None:
-            results[SearchMode.SEMANTIC] = ModeResult(SearchMode.SEMANTIC, semantic, 100, [1.0])
+            results[SearchMode.SEMANTIC] = ModeResult(
+                SearchMode.SEMANTIC, semantic, 100, [1.0]
+            )
         return BenchReport(results=results, query_count=10)
 
     def test_says_remove_the_arm_when_it_finds_nothing(self) -> None:
@@ -125,7 +135,9 @@ class TestVerdict:
 
     def test_inconclusive_without_both_baselines(self) -> None:
         report = BenchReport(
-            results={SearchMode.LEXICAL: ModeResult(SearchMode.LEXICAL, 1.0, 10, [1.0])},
+            results={
+                SearchMode.LEXICAL: ModeResult(SearchMode.LEXICAL, 1.0, 10, [1.0])
+            },
             query_count=5,
         )
         assert "inconclusive" in report.verdict()

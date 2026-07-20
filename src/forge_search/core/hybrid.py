@@ -131,7 +131,9 @@ class HybridIndex:
 
     # -- searching ---------------------------------------------------------
 
-    def search(self, query: str, *, limit: int = 10, mode: str = SearchMode.HYBRID) -> list[Hit]:
+    def search(
+        self, query: str, *, limit: int = 10, mode: str = SearchMode.HYBRID
+    ) -> list[Hit]:
         """Search with the requested arms, fused by rank.
 
         Falls back to lexical whenever the semantic arm is unavailable, rather

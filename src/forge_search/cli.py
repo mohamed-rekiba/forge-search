@@ -21,7 +21,7 @@ from pathlib import Path
 
 from .core.bench import BenchQuery, run_bench
 from .core.embedding import HashingEmbedder, OnnxEmbedder
-from .core.hybrid import HybridIndex, SearchMode
+from .core.hybrid import HybridIndex
 from .core.index import LexicalIndex
 from .core.model import DEFAULT_MODEL, download, is_present, model_dir
 from .core.query import QueryError
@@ -92,7 +92,9 @@ def _embedder(args: argparse.Namespace):
     try:
         return OnnxEmbedder(model_dir(), dim=DEFAULT_MODEL.dim)
     except (FileNotFoundError, ImportError) as exc:
-        print(f"semantic unavailable ({exc}); continuing lexical-only.", file=sys.stderr)
+        print(
+            f"semantic unavailable ({exc}); continuing lexical-only.", file=sys.stderr
+        )
         return None
 
 
@@ -136,9 +138,7 @@ def _cmd_bench(args: argparse.Namespace) -> int:
 
 def _cmd_serve(args: argparse.Namespace) -> int:
     roots = _resolve_roots(args)
-    search = ForgeSearch(
-        roots=roots, server_name=args.name, embedder=_embedder(args)
-    )
+    search = ForgeSearch(roots=roots, server_name=args.name, embedder=_embedder(args))
     try:
         search.run(transport=args.transport)
     finally:
@@ -150,9 +150,13 @@ def _cmd_index(args: argparse.Namespace) -> int:
     for root in _resolve_roots(args):
         with LexicalIndex(root) as index:
             stats = index.reindex(force=args.force)
-            state = "up to date" if stats.up_to_date else (
-                f"{stats.files_indexed} indexed, {stats.files_removed} removed, "
-                f"{stats.chunks_written} lines"
+            state = (
+                "up to date"
+                if stats.up_to_date
+                else (
+                    f"{stats.files_indexed} indexed, {stats.files_removed} removed, "
+                    f"{stats.chunks_written} lines"
+                )
             )
             print(f"{root.label}: {state}")
     return 0
@@ -222,8 +226,12 @@ def main(argv: list[str] | None = None) -> int:
         choices=["stdio", "sse", "streamable-http"],
         help="stdio (default) spawns per session; streamable-http serves many.",
     )
-    serve.add_argument("--semantic", action="store_true", help="Enable the semantic arm")
-    serve.add_argument("--hashing-embedder", action="store_true", help=argparse.SUPPRESS)
+    serve.add_argument(
+        "--semantic", action="store_true", help="Enable the semantic arm"
+    )
+    serve.add_argument(
+        "--hashing-embedder", action="store_true", help=argparse.SUPPRESS
+    )
     serve.set_defaults(func=_cmd_serve)
 
     index = sub.add_parser("index", help="Build or refresh indexes")
@@ -237,12 +245,18 @@ def main(argv: list[str] | None = None) -> int:
     search.add_argument("--project", help="Restrict to one root label")
     search.add_argument("--top-k", type=int, default=10)
     search.add_argument("--docs", action="store_true", help="Prose files only")
-    search.add_argument("--semantic", action="store_true", help="Enable the semantic arm")
-    search.add_argument("--hashing-embedder", action="store_true", help=argparse.SUPPRESS)
+    search.add_argument(
+        "--semantic", action="store_true", help="Enable the semantic arm"
+    )
+    search.add_argument(
+        "--hashing-embedder", action="store_true", help=argparse.SUPPRESS
+    )
     search.set_defaults(func=_cmd_search)
 
     warm = sub.add_parser("warm", help="Fetch the embedding model (semantic arm)")
-    warm.add_argument("--force", action="store_true", help="Re-download even if present")
+    warm.add_argument(
+        "--force", action="store_true", help="Re-download even if present"
+    )
     warm.set_defaults(func=_cmd_warm)
 
     bench = sub.add_parser(
@@ -256,7 +270,9 @@ def main(argv: list[str] | None = None) -> int:
         help="A query and the file that should be found. Repeatable.",
     )
     bench.add_argument("--top-k", type=int, default=10)
-    bench.add_argument("--semantic", action="store_true", help="Include the semantic arm")
+    bench.add_argument(
+        "--semantic", action="store_true", help="Include the semantic arm"
+    )
     bench.add_argument(
         "--hashing-embedder",
         action="store_true",

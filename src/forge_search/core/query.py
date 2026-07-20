@@ -84,7 +84,7 @@ def to_fts5(query: str) -> str:
         raise QueryError("query is empty")
 
     if query.startswith(RAW_PREFIX):
-        raw = query[len(RAW_PREFIX):].strip()
+        raw = query[len(RAW_PREFIX) :].strip()
         if not raw:
             raise QueryError("raw query is empty after the 'fts5:' prefix")
         return raw

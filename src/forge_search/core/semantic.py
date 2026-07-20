@@ -25,7 +25,14 @@ from pathlib import Path
 
 from .embedding import Embedder, serialize
 
-__all__ = ["Chunk", "chunk_text", "SemanticIndex", "vec_available", "CHUNK_LINES", "CHUNK_OVERLAP"]
+__all__ = [
+    "Chunk",
+    "chunk_text",
+    "SemanticIndex",
+    "vec_available",
+    "CHUNK_LINES",
+    "CHUNK_OVERLAP",
+]
 
 #: Lines per chunk. Large enough to carry meaning, small enough that a hit
 #: still points somewhere specific.
@@ -42,7 +49,9 @@ class Chunk:
     text: str
 
 
-def chunk_text(text: str, *, size: int = CHUNK_LINES, overlap: int = CHUNK_OVERLAP) -> Iterator[Chunk]:
+def chunk_text(
+    text: str, *, size: int = CHUNK_LINES, overlap: int = CHUNK_OVERLAP
+) -> Iterator[Chunk]:
     """Split text into overlapping line windows.
 
     Blank-only chunks are skipped — embedding whitespace produces a vector
@@ -82,7 +91,7 @@ def vec_available() -> bool:
     try:
         conn = sqlite3.connect(":memory:")
         conn.enable_load_extension(True)
-    except (AttributeError, sqlite3.OperationalError):
+    except AttributeError, sqlite3.OperationalError:
         return False
     try:
         import sqlite_vec

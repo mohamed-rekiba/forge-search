@@ -46,10 +46,14 @@ def search(tmp_path: Path):
 
 
 class TestToolRegistration:
-    def test_tools_are_registered_under_the_configured_name(self, tmp_path: Path) -> None:
+    def test_tools_are_registered_under_the_configured_name(
+        self, tmp_path: Path
+    ) -> None:
         """The server name is configuration — a standalone tool must not
         assume another product's identity."""
-        fs = ForgeSearch(roots=[Root(label="r", path=tmp_path)], server_name="custom-name")
+        fs = ForgeSearch(
+            roots=[Root(label="r", path=tmp_path)], server_name="custom-name"
+        )
         mcp = fs.build()
 
         names = {t.name for t in asyncio.run(mcp.list_tools())}
@@ -63,19 +67,24 @@ class TestToolRegistration:
         tools = {t.name: t for t in asyncio.run(fs.build().list_tools())}
 
         assert tools["search_code"].inputSchema["required"] == ["query"]
-        assert "required" not in tools["reindex"].inputSchema or not tools[
-            "reindex"
-        ].inputSchema["required"]
+        assert (
+            "required" not in tools["reindex"].inputSchema
+            or not tools["reindex"].inputSchema["required"]
+        )
         fs.close()
 
 
 class TestSearching:
     def test_searches_all_roots_by_default(self, search: ForgeSearch) -> None:
-        result = search._search("validate_token", project=None, top_k=10, doc_only=False)
+        result = search._search(
+            "validate_token", project=None, top_k=10, doc_only=False
+        )
         assert {r["project"] for r in result["results"]} == {"alpha", "beta"}
 
     def test_project_filter_restricts(self, search: ForgeSearch) -> None:
-        result = search._search("validate_token", project="beta", top_k=10, doc_only=False)
+        result = search._search(
+            "validate_token", project="beta", top_k=10, doc_only=False
+        )
         assert {r["project"] for r in result["results"]} == {"beta"}
 
     def test_unknown_project_raises_rather_than_searching_everything(
@@ -97,12 +106,16 @@ class TestSearching:
         assert paths == {"guide.md"}, f"non-prose leaked into search_docs: {paths}"
 
     def test_results_are_ranked_descending(self, search: ForgeSearch) -> None:
-        result = search._search("validate_token", project=None, top_k=10, doc_only=False)
+        result = search._search(
+            "validate_token", project=None, top_k=10, doc_only=False
+        )
         scores = [r["score"] for r in result["results"]]
         assert scores == sorted(scores, reverse=True)
 
     def test_paths_returned_are_relative(self, search: ForgeSearch) -> None:
-        result = search._search("validate_token", project=None, top_k=10, doc_only=False)
+        result = search._search(
+            "validate_token", project=None, top_k=10, doc_only=False
+        )
         assert all(not r["path"].startswith("/") for r in result["results"])
 
 
@@ -125,20 +138,28 @@ class TestBounds:
 
 
 class TestErrorsStayLoud:
-    def test_bad_query_raises_rather_than_returning_empty(self, search: ForgeSearch) -> None:
+    def test_bad_query_raises_rather_than_returning_empty(
+        self, search: ForgeSearch
+    ) -> None:
         """The bug this project's own smoke test found: an unparseable query
         must never be indistinguishable from an honest miss."""
         with pytest.raises(QueryError):
-            search._search("fts5:unbalanced (paren", project=None, top_k=10, doc_only=False)
+            search._search(
+                "fts5:unbalanced (paren", project=None, top_k=10, doc_only=False
+            )
 
     def test_genuine_miss_returns_empty_results(self, search: ForgeSearch) -> None:
-        result = search._search("nothinglikethis", project=None, top_k=10, doc_only=False)
+        result = search._search(
+            "nothinglikethis", project=None, top_k=10, doc_only=False
+        )
         assert result["results"] == []
         assert result["degraded"] is None
 
 
 class TestFreshness:
-    def test_edits_are_visible_without_an_explicit_reindex(self, search: ForgeSearch) -> None:
+    def test_edits_are_visible_without_an_explicit_reindex(
+        self, search: ForgeSearch
+    ) -> None:
         """Freshness is owned by the read path. Requiring callers to remember
         a reindex is a convention, and conventions are what produced every
         defect this project fixes."""
@@ -147,14 +168,20 @@ class TestFreshness:
         beta = next(r for r in search.roots if r.label == "beta")
         (beta.path / "other.py").write_text("def brand_new_symbol():\n    pass\n")
 
-        result = search._search("brand_new_symbol", project=None, top_k=10, doc_only=False)
+        result = search._search(
+            "brand_new_symbol", project=None, top_k=10, doc_only=False
+        )
 
         assert result["results"], "an edit was invisible until an explicit reindex"
         assert result["reindexed"] == ["beta"], "the auto-reindex should be reported"
 
-    def test_no_reindex_reported_when_nothing_changed(self, search: ForgeSearch) -> None:
+    def test_no_reindex_reported_when_nothing_changed(
+        self, search: ForgeSearch
+    ) -> None:
         search._search("validate_token", project=None, top_k=10, doc_only=False)
-        result = search._search("validate_token", project=None, top_k=10, doc_only=False)
+        result = search._search(
+            "validate_token", project=None, top_k=10, doc_only=False
+        )
         assert result["reindexed"] is None
 
 

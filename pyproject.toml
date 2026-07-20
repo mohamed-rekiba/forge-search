@@ -31,13 +31,13 @@ semantic = [
 # a per-session stdio subprocess. See docs/decisions/ on the transport split.
 http = [
     "fastapi>=0.139.2",
-    "mcp>=1.28.1",
     "uvicorn>=0.51.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "ruff>=0.15.22",
 ]
 
 [project.scripts]
@@ -49,3 +49,14 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 90
+target-version = "py314"
+
+[tool.ruff.lint]
+# Deliberately modest. The bugs this project actually shipped were silent
+# behavioural gaps — a relative path, an unstamped index, a swallowed error —
+# and no linter would have caught any of them. Lint keeps the source tidy; the
+# test suite and the clean-install acceptance test do the real work.
+select = ["E", "F", "I", "UP", "B"]
