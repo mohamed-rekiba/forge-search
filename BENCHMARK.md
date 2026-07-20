@@ -8,7 +8,7 @@ deliberately conceptual. **`top_k`:** 10.
 
 ## Current result
 
-```
+```text
 mode         recall      chars    p50 ms    p95 ms
 lexical      25.0%        717       1.4       7.5
 semantic     87.5%      2,651       4.8       6.9
@@ -57,7 +57,7 @@ default so they cannot drift back on the strength of the citation alone.
 against long passage — and recommend the multi-QA family for the latter. That
 is the model author's own stated scope, not folklore.
 
-```
+```text
 all-MiniLM-L6-v2        (symmetric, "wrong regime")   87.5%
 multi-qa-MiniLM-L6-cos  (asymmetric, "right regime")  62.5%
 ```
@@ -69,7 +69,7 @@ The theoretically-correct model lost by 25 points. `all-MiniLM` stays default.
 cAST (ACL Findings EMNLP 2025, peer-reviewed) reports ~4.3 points of Recall@5
 *gained* from splitting on AST boundaries rather than line counts.
 
-```
+```text
 breadcrumbs + line windows        87.5%
 breadcrumbs + structural chunks   75.0%
 ```
