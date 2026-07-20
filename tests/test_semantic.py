@@ -29,6 +29,7 @@ from forge_search.core.semantic import (
     SemanticIndex,
     breadcrumb,
     chunk_text,
+    structural_chunks,
     summary_chunk,
     vec_available,
 )
@@ -259,8 +260,11 @@ class TestSummaryChunkIsIndexed:
             written = idx.index_file("check-secrets.sh", body)
             idx.commit()
 
-            # windows + one summary
-            assert written == len(list(chunk_text(body))) + 1
+            # structural chunks + one summary
+            assert (
+                written
+                == len(list(structural_chunks(body, relpath="check-secrets.sh"))) + 1
+            )
             assert idx.search("Blocks commits containing secrets", limit=3)
 
 
@@ -312,3 +316,58 @@ class TestBreadcrumb:
         chunks = list(chunk_text("a\nb\nc\nd", size=2, overlap=0))
         assert not any(c.text.startswith("/") for c in chunks)
         assert chunks[0].text == "a\nb"
+
+
+class TestStructuralChunking:
+    """Split on real boundaries rather than arbitrary line counts.
+
+    A 12-line window bears no relationship to where a function starts, so it
+    routinely cuts one in half — severing the context that makes it findable.
+    cAST (ACL Findings EMNLP 2025) reports ~4.3 points of Recall@5 from
+    respecting structure instead.
+    """
+
+    def test_splits_python_on_function_boundaries(self) -> None:
+        code = (
+            "import os\n\n"
+            "def validate_token(t):\n    return decode(t)\n\n"
+            "def refresh_session(u):\n    return issue(u)\n"
+        )
+        labels = [c.text.splitlines()[0] for c in structural_chunks(code, relpath="a.py")]
+        assert any("validate_token" in x or "refresh_session" in x for x in labels)
+
+    def test_splits_markdown_on_headings(self) -> None:
+        md = "# Overview\nprose\nmore\n\n## Merge gates\ndetail\nmore\n"
+        labels = [c.text.splitlines()[0] for c in structural_chunks(md, relpath="g.md")]
+        assert any("Overview" in x for x in labels)
+        assert any("Merge gates" in x for x in labels)
+
+    def test_hash_is_a_comment_not_a_heading_outside_markdown(self) -> None:
+        """The bug this gating exists for: `# verify signature` in a shell
+        script was becoming a 'heading', so breadcrumbs pointed at incidental
+        comments instead of the enclosing function."""
+        code = (
+            "check_secrets() {\n  # verify signature\n  grep -r key .\n  echo done\n}\n"
+        )
+        labels = [c.text.splitlines()[0] for c in structural_chunks(code, relpath="h.sh")]
+
+        assert not any("verify signature" in x for x in labels)
+
+    def test_falls_back_to_windows_without_structure(self) -> None:
+        """Plain prose has no boundaries to respect — windows are correct."""
+        text = "\n".join(f"just a line {i}" for i in range(40))
+        chunks = list(structural_chunks(text, relpath="notes.txt"))
+        assert len(chunks) > 1
+
+    def test_long_region_is_split_but_keeps_its_breadcrumb(self) -> None:
+        """A 400-line function embedded whole is as diluted as a contextless
+        window — the same failure at the other extreme."""
+        body = "\n".join(f"    step_{i}()" for i in range(80))
+        code = f"def enormous():\n{body}\n"
+        chunks = list(structural_chunks(code, relpath="big.py"))
+
+        assert len(chunks) > 1
+        assert all("enormous" in c.text.splitlines()[0] for c in chunks)
+
+    def test_empty_text_yields_nothing(self) -> None:
+        assert list(structural_chunks("", relpath="f.py")) == []

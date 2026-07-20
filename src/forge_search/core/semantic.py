@@ -31,6 +31,8 @@ __all__ = [
     "chunk_text",
     "summary_chunk",
     "breadcrumb",
+    "structural_chunks",
+    "structural_boundaries",
     "SemanticIndex",
     "vec_available",
     "CHUNK_LINES",
@@ -115,8 +117,7 @@ def summary_chunk(relpath: str, text: str) -> Chunk | None:
 #: regex rather than parsing: the goal is a locating label, not a faithful
 #: syntax tree, and a wrong label costs a slightly worse breadcrumb rather
 #: than a crash.
-_HEADING_PATTERNS = (
-    re.compile(r"^\s*(#{1,6})\s+(.*\S)"),  # markdown heading
+_CODE_PATTERNS = (
     re.compile(r"^\s*(?:export\s+)?(?:async\s+)?def\s+(\w+)"),  # python
     re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)"),  # js/ts
     re.compile(r"^\s*(?:export\s+)?class\s+(\w+)"),  # class
@@ -124,14 +125,39 @@ _HEADING_PATTERNS = (
     re.compile(r"^\s*(?:export\s+)?const\s+(\w+)\s*="),  # ts const
 )
 
+#: Markdown headings, applied ONLY to markdown files.
+#:
+#: This is extension-gated because `#` is a comment marker in shell, Python,
+#: YAML, and TOML — the majority of what gets indexed. Applied blindly, every
+#: `# verify signature` in a shell script became a "heading", so a chunk's
+#: breadcrumb pointed at an incidental comment instead of the enclosing
+#: function. Caught by eyeballing the output on a real file: a chunk inside
+#: `validate_token` was labelled `> verify signature`.
+_MARKDOWN_HEADING = re.compile(r"^\s*#{1,6}\s+(.*\S)")
 
-def _label_for(line: str) -> str | None:
-    """The region name a line declares, if any."""
-    for pattern in _HEADING_PATTERNS:
+#: Extensions whose `#` lines are headings rather than comments.
+_MARKDOWN_SUFFIXES = (".md", ".markdown", ".mdx")
+
+
+def _label_for(line: str, *, markdown: bool = False) -> str | None:
+    """The region name a line declares, if any.
+
+    `markdown` gates heading detection, because `#` means something entirely
+    different in the languages that dominate this corpus.
+    """
+    if markdown:
+        match = _MARKDOWN_HEADING.match(line)
+        if match:
+            return match.group(1).strip()
+    for pattern in _CODE_PATTERNS:
         match = pattern.match(line)
         if match:
-            return match.group(match.lastindex or 1).strip()
+            return match.group(1).strip()
     return None
+
+
+def _is_markdown(relpath: str | None) -> bool:
+    return bool(relpath) and relpath.lower().endswith(_MARKDOWN_SUFFIXES)  # type: ignore[union-attr]
 
 
 def breadcrumb(relpath: str, lines: list[str], upto: int) -> str:
@@ -151,12 +177,115 @@ def breadcrumb(relpath: str, lines: list[str], upto: int) -> str:
     The breadcrumb is placed in the chunk *text*, not a metadata column, so it
     is seen by both the embedding and the full-text index rather than only one.
     """
+    markdown = _is_markdown(relpath)
     label = None
     for i in range(min(upto, len(lines)) - 1, -1, -1):
-        label = _label_for(lines[i])
+        label = _label_for(lines[i], markdown=markdown)
         if label:
             break
     return f"{relpath} > {label}" if label else relpath
+
+
+#: A structural region longer than this is windowed further. A 400-line
+#: function embedded whole is as diluted as a 12-line window is contextless —
+#: the same failure at the other extreme.
+MAX_STRUCTURAL_LINES = 40
+
+#: Below this, a region merges forward rather than being embedded alone. A
+#: two-line helper is not enough text to place in meaning-space.
+MIN_STRUCTURAL_LINES = 3
+
+
+def structural_boundaries(lines: list[str], *, markdown: bool = False) -> list[int]:
+    """Line indices where a new structural region begins.
+
+    Fixed-line windows bear no relationship to where a function or section
+    actually starts, so they routinely cut one in half — severing the very
+    context that makes the text findable. Splitting on real boundaries is the
+    documented fix (cAST, ACL Findings EMNLP 2025, ~4.3 points of Recall@5 on
+    code retrieval).
+
+    Regex rather than a parser is deliberate at this scale: a missed boundary
+    degrades to a slightly worse chunk, whereas a parser adds a dependency and
+    a per-language failure mode.
+    """
+    return [
+        i
+        for i, line in enumerate(lines)
+        if _label_for(line, markdown=markdown) is not None
+    ]
+
+
+def _chunk(
+    lines: list[str], start: int, body_lines: list[str], relpath: str | None
+) -> Chunk:
+    body = "\n".join(body_lines)
+    if relpath is not None:
+        body = f"{breadcrumb(relpath, lines, start + 1)}\n{body}"
+    return Chunk(start_line=start + 1, text=body)
+
+
+def structural_chunks(
+    text: str,
+    *,
+    relpath: str | None = None,
+    max_lines: int = MAX_STRUCTURAL_LINES,
+    min_lines: int = MIN_STRUCTURAL_LINES,
+) -> Iterator[Chunk]:
+    """Chunk on structural boundaries, falling back to windows when none exist.
+
+    Three cases, each for a reason:
+
+    * **No boundaries** — plain prose, config, data. Falls back to line
+      windows, the right shape for text with no structure to respect.
+    * **Region longer than `max_lines`** — windowed *within* the region, so a
+      long function is still split but every piece keeps its breadcrumb.
+    * **Region shorter than `min_lines`** — merged forward. A two-line helper
+      embedded alone is noise competing for a top-k slot.
+    """
+    lines = text.splitlines()
+    if not lines:
+        return
+
+    boundaries = structural_boundaries(lines, markdown=_is_markdown(relpath))
+    if not boundaries:
+        yield from chunk_text(text, relpath=relpath)
+        return
+
+    # Anything before the first boundary (imports, a file header) is its own
+    # leading region.
+    starts = ([0] if boundaries[0] != 0 else []) + boundaries
+    regions = list(zip(starts, starts[1:] + [len(lines)], strict=True))
+
+    pending_start: int | None = None
+    for start, end in regions:
+        if pending_start is not None:
+            start, pending_start = pending_start, None
+
+        if 0 < end - start < min_lines:
+            pending_start = start
+            continue
+
+        region = lines[start:end]
+        if not "\n".join(region).strip():
+            continue
+
+        if len(region) <= max_lines:
+            yield _chunk(lines, start, region, relpath)
+            continue
+
+        step = CHUNK_LINES - CHUNK_OVERLAP
+        for offset in range(0, len(region), step):
+            window = region[offset : offset + CHUNK_LINES]
+            if window and "\n".join(window).strip():
+                yield _chunk(lines, start + offset, window, relpath)
+            if offset + CHUNK_LINES >= len(region):
+                break
+
+    if pending_start is not None:
+        region = lines[pending_start:]
+        if "\n".join(region).strip():
+            yield _chunk(lines, pending_start, region, relpath)
 
 
 def chunk_text(
@@ -277,7 +406,7 @@ class SemanticIndex:
         Embedding is the expensive half of indexing, so chunks are batched
         into a single call rather than embedded one at a time.
         """
-        chunks = list(chunk_text(text, relpath=relpath))
+        chunks = list(structural_chunks(text, relpath=relpath))
         # The summary leads, so the file's own description competes on its own
         # terms rather than diluted inside a sliding window. See summary_chunk.
         summary = summary_chunk(relpath, text)
