@@ -29,6 +29,33 @@ from .traversal import TraversalConfig, excerpt, walk
 
 __all__ = ["Hit", "IndexStats", "LexicalIndex"]
 
+#: Score assigned to a filename match, chosen to sit above BM25 content scores
+#: rather than being tuned against them. BM25 values here run roughly 0–20
+#: after negation, so this reliably ranks a filename hit first without
+#: pretending the two are on a shared scale — they are not, and calibrating
+#: them against each other would need corpus statistics that shift on every
+#: reindex. Same reasoning as using rank fusion between the arms.
+_PATH_MATCH_SCORE = 1000.0
+
+#: Bump whenever the schema or the indexing strategy changes in a way that
+#: makes an existing index incomplete or wrong.
+#:
+#: This exists because the same bug shipped twice: adding the semantic arm,
+#: then adding the paths table, each left existing indexes silently empty for
+#: the new feature. Both times the index looked healthy, searches kept
+#: returning results, and the new capability contributed nothing forever with
+#: no error — the exact failure shape this whole project exists to eliminate,
+#: reproduced by its own incremental-indexing logic.
+#:
+#: An index whose stored version differs is rebuilt on open. A rebuild costs
+#: seconds; a silently incomplete index costs correctness indefinitely.
+#: Bumped to 4 to invalidate indexes mis-stamped by a buggy version-3 guard
+#: that wrote the version without clearing. Those indexes claim to be current
+#: while missing the paths table entirely — and because the stamp matches, no
+#: later check would ever catch them. A bump is the only way past a bad stamp,
+#: which is itself an argument for making these guards blunt rather than clever.
+SCHEMA_VERSION = 4
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS files (
     id        INTEGER PRIMARY KEY,
@@ -43,6 +70,16 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
     relpath UNINDEXED,
     line    UNINDEXED,
     body,
+    tokenize = 'unicode61 remove_diacritics 2'
+);
+
+-- Paths are indexed separately from content, because a filename lookup is
+-- a different question from a content lookup. Searching for
+-- "require-active-ticket" should find require-active-ticket.sh even though
+-- that file never mentions its own name — which a content-only index cannot
+-- do, and which was one of the dominant query shapes this tool targets.
+CREATE VIRTUAL TABLE IF NOT EXISTS paths USING fts5(
+    relpath,
     tokenize = 'unicode61 remove_diacritics 2'
 );
 
@@ -88,6 +125,40 @@ class LexicalIndex:
         self._conn = sqlite3.connect(self.db_path)
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
+        self._migrate_if_stale()
+
+    def _migrate_if_stale(self) -> None:
+        """Discard the index if it was built by a different schema version.
+
+        Deliberately blunt: everything is dropped and rebuilt on next reindex,
+        rather than attempting a targeted migration per version. A partial
+        migration that misses one table reintroduces exactly the silent-gap
+        bug this guard exists to prevent, and rebuilding is cheap.
+        """
+        row = self._conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()
+        stored = int(row[0]) if row else None
+
+        if stored == SCHEMA_VERSION:
+            return
+
+        with self._conn:
+            # Clear unconditionally when the version does not match, INCLUDING
+            # when no version is stored. An unstamped index is a pre-versioning
+            # index — precisely the case that needs rebuilding. An earlier
+            # version of this guard skipped the clear when `stored is None`,
+            # which stamped the current version onto a stale index and left the
+            # gap it was written to close. Clearing an already-empty index is
+            # free; skipping a needed rebuild is silent and permanent.
+            self._conn.execute("DELETE FROM chunks")
+            self._conn.execute("DELETE FROM paths")
+            self._conn.execute("DELETE FROM files")
+            self._conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (str(SCHEMA_VERSION),),
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -169,15 +240,19 @@ class LexicalIndex:
         with self._conn:
             if force:
                 self._conn.execute("DELETE FROM chunks")
+                self._conn.execute("DELETE FROM paths")
                 self._conn.execute("DELETE FROM files")
 
             for rel in removed:
                 self._conn.execute("DELETE FROM chunks WHERE relpath = ?", (rel,))
+                self._conn.execute("DELETE FROM paths WHERE relpath = ?", (rel,))
                 self._conn.execute("DELETE FROM files WHERE relpath = ?", (rel,))
 
             for rel in changed:
                 if not force:
                     self._conn.execute("DELETE FROM chunks WHERE relpath = ?", (rel,))
+                    self._conn.execute("DELETE FROM paths WHERE relpath = ?", (rel,))
+                self._conn.execute("INSERT INTO paths (relpath) VALUES (?)", (rel,))
                 chunks_written += self._index_file(rel)
                 size, mtime_ns = on_disk[rel]
                 self._conn.execute(
@@ -231,6 +306,7 @@ class LexicalIndex:
         """
         expression = to_fts5(query)
         try:
+            path_matches = self._path_matches(expression, limit)
             rows = self._conn.execute(
                 "SELECT relpath, line, body, bm25(chunks) AS rank "
                 "FROM chunks WHERE chunks MATCH ? ORDER BY rank LIMIT ?",
@@ -240,7 +316,33 @@ class LexicalIndex:
             raise QueryError(f"could not parse query {query!r}: {exc}") from exc
 
         hits: list[Hit] = []
+        seen: set[tuple[str, int]] = set()
+
+        # Path matches first. Searching for a filename is a different question
+        # from searching for content, and when someone types
+        # "require-active-ticket" they almost always want that file — not the
+        # test fixtures that happen to mention it. A content-only index cannot
+        # answer this at all: that file never contains its own name.
+        for relpath in path_matches:
+            key = (relpath, 1)
+            if key in seen:
+                continue
+            seen.add(key)
+            hits.append(
+                Hit(
+                    project=self.root.label,
+                    path=relpath,
+                    line=1,
+                    excerpt=f"(filename match) {relpath}",
+                    score=_PATH_MATCH_SCORE,
+                )
+            )
+
         for relpath, line, body, rank in rows:
+            key = (relpath, line)
+            if key in seen:
+                continue
+            seen.add(key)
             start, length = _match_span(body, query)
             hits.append(
                 Hit(
@@ -253,7 +355,16 @@ class LexicalIndex:
                     score=-float(rank),
                 )
             )
-        return hits
+        return hits[:limit]
+
+    def _path_matches(self, expression: str, limit: int) -> list[str]:
+        """Filenames matching the query, best first."""
+        rows = self._conn.execute(
+            "SELECT relpath, bm25(paths) AS rank FROM paths "
+            "WHERE paths MATCH ? ORDER BY rank LIMIT ?",
+            (expression, limit),
+        ).fetchall()
+        return [r[0] for r in rows]
 
 
 def _match_span(body: str, query: str) -> tuple[int, int]:

@@ -189,3 +189,120 @@ class TestQuerying:
         with LexicalIndex(Root(label="minified", path=src)) as idx:
             idx.reindex()
             assert idx.search("NEEDLE") == []
+
+
+class TestPathMatching:
+    """Filename lookup is a distinct capability from content search.
+
+    Added after a benchmark on a real repository showed both
+    `require-active-ticket.sh` and `block-unreviewed-merge.sh` unfindable by
+    name: neither file contains its own filename, so a content-only index
+    cannot reach them. Filename lookup was one of the dominant query shapes
+    this tool targets, which made it a gap rather than a nicety.
+    """
+
+    def test_file_findable_by_name_it_never_contains(self, tmp_path: Path) -> None:
+        src = tmp_path / "repo"
+        (src / "hooks").mkdir(parents=True)
+        # Deliberately never mentions its own name — the real case.
+        (src / "hooks" / "require-active-ticket.sh").write_text(
+            "#!/bin/bash\necho 'unrelated content'\n"
+        )
+
+        with LexicalIndex(Root(label="repo", path=src)) as idx:
+            idx.reindex()
+            hits = idx.search("require-active-ticket")
+
+        assert any(h.path == "hooks/require-active-ticket.sh" for h in hits), (
+            "a content-only index cannot find a file by a name it never "
+            "contains — this is what the paths table exists for"
+        )
+
+    def test_path_match_outranks_incidental_content_mentions(self, tmp_path: Path) -> None:
+        """Someone searching a filename wants the file, not the fixtures that
+        happen to reference it."""
+        src = tmp_path / "repo"
+        (src / "hooks").mkdir(parents=True)
+        (src / "hooks" / "target-hook.sh").write_text("#!/bin/bash\necho hi\n")
+        (src / "tests.md").write_text("\n".join(["mentions target-hook here"] * 20))
+
+        with LexicalIndex(Root(label="repo", path=src)) as idx:
+            idx.reindex()
+            hits = idx.search("target-hook")
+
+        assert hits[0].path == "hooks/target-hook.sh"
+
+    def test_deleted_file_drops_out_of_path_matches(self, tmp_path: Path) -> None:
+        src = tmp_path / "repo"
+        src.mkdir()
+        (src / "temporary-thing.py").write_text("x = 1\n")
+
+        with LexicalIndex(Root(label="repo", path=src)) as idx:
+            idx.reindex()
+            assert idx.search("temporary-thing")
+
+            (src / "temporary-thing.py").unlink()
+            idx.reindex()
+
+            assert not idx.search("temporary-thing")
+
+
+class TestSchemaVersioning:
+    """A schema change must not leave existing indexes silently incomplete.
+
+    This shipped as a bug twice — the semantic arm and the paths table each
+    left older indexes empty for the new feature, with searches still
+    returning results and nothing reporting the gap.
+    """
+
+    def test_version_mismatch_forces_a_rebuild(self, tmp_path: Path) -> None:
+        import sqlite3
+
+        from forge_search.core.index import SCHEMA_VERSION
+
+        src = tmp_path / "repo"
+        src.mkdir()
+        (src / "findme.py").write_text("def hello():\n    pass\n")
+        root = Root(label="repo", path=src)
+
+        with LexicalIndex(root) as idx:
+            idx.reindex()
+            db_path = idx.db_path
+            assert idx.indexed_count() == 1
+
+        # Simulate an index written by an older schema.
+        conn = sqlite3.connect(db_path)
+        conn.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'",
+                     (str(SCHEMA_VERSION - 1),))
+        conn.commit()
+        conn.close()
+
+        with LexicalIndex(root) as reopened:
+            assert reopened.indexed_count() == 0, "stale index was not discarded"
+            reopened.reindex()
+            assert reopened.search("hello")
+
+    def test_unstamped_index_is_rebuilt(self, tmp_path: Path) -> None:
+        """An index with no version stamp predates versioning entirely — the
+        exact case an earlier guard skipped, stamping the current version onto
+        stale data and making the gap permanent."""
+        import sqlite3
+
+        src = tmp_path / "repo"
+        src.mkdir()
+        (src / "findme.py").write_text("def hello():\n    pass\n")
+        root = Root(label="repo", path=src)
+
+        with LexicalIndex(root) as idx:
+            idx.reindex()
+            db_path = idx.db_path
+
+        conn = sqlite3.connect(db_path)
+        conn.execute("DELETE FROM meta WHERE key = 'schema_version'")
+        conn.commit()
+        conn.close()
+
+        with LexicalIndex(root) as reopened:
+            assert reopened.indexed_count() == 0, (
+                "an unstamped index must be rebuilt, not stamped as current"
+            )
