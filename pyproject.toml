@@ -1,0 +1,51 @@
+[project]
+name = "forge-search"
+version = "0.1.0"
+description = "Local code and docs search over one or many repositories, served as an MCP tool."
+readme = "README.md"
+authors = [
+    { name = "Muhammad Shaban", email = "muhammad.shaban.dev@gmail.com" }
+]
+requires-python = ">=3.14"
+license = { text = "MIT" }
+
+# The lexical index is SQLite FTS5, which ships inside CPython's stdlib
+# sqlite3 — so the base install needs no third-party search dependency at all.
+dependencies = [
+    "mcp>=1.28.1",
+]
+
+[project.optional-dependencies]
+# The semantic arm, split out deliberately: the lexical-only install stays
+# small and compiler-free, and forge-search is usable before the ~90 MB
+# embedding model is ever fetched.
+# Both verified to resolve --only-binary=:all: on cp314 (2026-07-21):
+#   sqlite-vec 0.1.9 · onnxruntime 1.27.0
+semantic = [
+    "onnxruntime>=1.27.0",
+    "sqlite-vec>=0.1.9",
+    "tokenizers>=0.23.1",
+]
+
+# HTTP transport. Only needed to run as a long-lived shared server instead of
+# a per-session stdio subprocess. See docs/decisions/ on the transport split.
+http = [
+    "fastapi>=0.139.2",
+    "mcp>=1.28.1",
+    "uvicorn>=0.51.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[project.scripts]
+forge-search = "forge_search.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.28,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
