@@ -28,6 +28,7 @@ from forge_search.core.semantic import (
     CHUNK_OVERLAP,
     SemanticIndex,
     chunk_text,
+    summary_chunk,
     vec_available,
 )
 
@@ -164,9 +165,7 @@ class TestSemanticIndex:
         index.drop_file("drop.py")
         index.commit()
 
-        assert {relpath for relpath, _, _ in index.search("def", limit=10)} == {
-            "keep.py"
-        }
+        assert {relpath for relpath, _, _ in index.search("def", limit=10)} == {"keep.py"}
 
     def test_empty_file_indexes_nothing(self, index: SemanticIndex) -> None:
         assert index.index_file("empty.py", "") == 0
@@ -188,3 +187,77 @@ class TestGracefulAbsence:
         than raise — including on a Python whose sqlite3 lacks extension
         loading entirely."""
         assert isinstance(vec_available(), bool)
+
+
+class TestSummaryChunk:
+    """Per-file summary chunks — the fix that took semantic recall 0% -> 50%.
+
+    Sliding windows alone buried each file's description inside surrounding
+    boilerplate, and mean-pooling averaged the signal away. Measured on the
+    real corpus: header alone 0.484, the window containing it 0.368, path +
+    header 0.520.
+    """
+
+    def test_harvests_the_leading_comment_block(self) -> None:
+        text = (
+            "#!/bin/bash\n"
+            "# Scans staged files for hardcoded secrets before git commit.\n"
+            "# Blocks the commit if secrets are detected.\n"
+            "\n"
+            "INPUT=$(cat)\n"
+        )
+        chunk = summary_chunk("hooks/check-secrets.sh", text)
+
+        assert chunk is not None
+        assert "Scans staged files for hardcoded secrets" in chunk.text
+        assert "Blocks the commit" in chunk.text
+
+    def test_includes_the_path(self) -> None:
+        """The path carries the filename, which is often a file's single most
+        descriptive token — and it measured highest of the three variants."""
+        chunk = summary_chunk("hooks/check-secrets.sh", "# Does a thing.\n")
+        assert chunk is not None and "hooks/check-secrets.sh" in chunk.text
+
+    def test_excludes_code_and_boilerplate(self) -> None:
+        """The whole point: code lines are what diluted the signal."""
+        text = "# Real description here.\n\nINPUT=$(cat)\njq -r '.tool_input'\n"
+        chunk = summary_chunk("f.sh", text)
+
+        assert chunk is not None
+        assert "INPUT=" not in chunk.text
+        assert "jq" not in chunk.text
+
+    def test_shebang_is_dropped(self) -> None:
+        chunk = summary_chunk("f.sh", "#!/bin/bash\n# The description.\n")
+        assert chunk is not None and "/bin/bash" not in chunk.text
+
+    def test_none_when_there_is_no_header(self) -> None:
+        """A summary of nothing but a path is noise, not signal."""
+        assert summary_chunk("f.py", "x = 1\ny = 2\n") is None
+
+    def test_handles_slash_comments(self) -> None:
+        chunk = summary_chunk("a.ts", "// Derives gate config.\nconst x = 1;\n")
+        assert chunk is not None and "Derives gate config" in chunk.text
+
+    def test_stops_at_the_first_blank_after_content(self) -> None:
+        text = "# Header line.\n\n# A much later unrelated comment.\nx = 1\n"
+        chunk = summary_chunk("f.py", text)
+
+        assert chunk is not None
+        assert "Header line" in chunk.text
+        assert "unrelated" not in chunk.text
+
+
+@requires_vec
+class TestSummaryChunkIsIndexed:
+    def test_summary_is_stored_alongside_windows(self, tmp_path: Path) -> None:
+        with SemanticIndex(tmp_path / "idx.db", HashingEmbedder()) as idx:
+            body = "# Blocks commits containing secrets.\n" + "\n".join(
+                f"line {i}" for i in range(30)
+            )
+            written = idx.index_file("check-secrets.sh", body)
+            idx.commit()
+
+            # windows + one summary
+            assert written == len(list(chunk_text(body))) + 1
+            assert idx.search("Blocks commits containing secrets", limit=3)

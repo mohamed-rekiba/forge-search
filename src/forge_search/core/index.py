@@ -53,7 +53,7 @@ _PATH_MATCH_SCORE = 1000.0
 #: while missing the paths table entirely — and because the stamp matches, no
 #: later check would ever catch them. A bump is the only way past a bad stamp,
 #: which is itself an argument for making these guards blunt rather than clever.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS files (
@@ -183,9 +183,7 @@ class LexicalIndex:
         return found
 
     def _indexed_files(self) -> dict[str, tuple[int, int]]:
-        rows = self._conn.execute(
-            "SELECT relpath, size, mtime_ns FROM files"
-        ).fetchall()
+        rows = self._conn.execute("SELECT relpath, size, mtime_ns FROM files").fetchall()
         return {r[0]: (r[1], r[2]) for r in rows}
 
     def is_stale(self) -> bool:
@@ -204,9 +202,7 @@ class LexicalIndex:
     def indexed_relpaths(self) -> list[str]:
         """Every indexed relpath. Used to backfill a companion index that was
         added after this one was already populated."""
-        return [
-            r[0] for r in self._conn.execute("SELECT relpath FROM files").fetchall()
-        ]
+        return [r[0] for r in self._conn.execute("SELECT relpath FROM files").fetchall()]
 
     def pending_changes(self, *, force: bool = False) -> tuple[list[str], list[str]]:
         """Return ``(changed, removed)`` relpaths without applying anything.

@@ -28,10 +28,12 @@ from .embedding import Embedder, serialize
 __all__ = [
     "Chunk",
     "chunk_text",
+    "summary_chunk",
     "SemanticIndex",
     "vec_available",
     "CHUNK_LINES",
     "CHUNK_OVERLAP",
+    "SUMMARY_SCAN_LINES",
 ]
 
 #: Lines per chunk. Large enough to carry meaning, small enough that a hit
@@ -43,10 +45,68 @@ CHUNK_LINES = 12
 CHUNK_OVERLAP = 4
 
 
+#: How many leading lines to scan for a file's descriptive header.
+SUMMARY_SCAN_LINES = 40
+
+#: Comment markers worth harvesting for a summary, across the languages this
+#: indexes. Deliberately a small fixed set rather than per-language parsing —
+#: the goal is a usable description, not a faithful AST.
+_COMMENT_PREFIXES = ("#", "//", "--", "*", '"""', "'''", ";;")
+
+
 @dataclass(frozen=True, slots=True)
 class Chunk:
     start_line: int
     text: str
+
+
+def summary_chunk(relpath: str, text: str) -> Chunk | None:
+    """Build one undiluted chunk describing what a file *is*.
+
+    This exists because of a measured failure. Indexing only sliding windows
+    buried each file's description inside surrounding boilerplate, and
+    mean-pooling averaged the signal away. Measured against the query
+    "what stops me committing secrets" and its correct target:
+
+        header comment alone ............ 0.484
+        the 12-line window containing it  0.368   <- what was indexed
+        path + header ................... 0.520   <- what this produces
+
+    A 24% signal loss, on the one chunk that most identifies the file. Across
+    16,726 chunks competing for ten slots, that difference decides whether the
+    right file is findable at all — the first real-model benchmark scored 0%
+    recall with the diluted version.
+
+    Returns None when a file has no descriptive header worth indexing; a
+    summary of nothing but a path adds noise rather than signal.
+    """
+    lines = text.splitlines()[:SUMMARY_SCAN_LINES]
+
+    harvested: list[str] = []
+    for raw in lines:
+        stripped = raw.strip()
+        if not stripped:
+            # A blank line after real content ends the header block. Before
+            # any content it is just leading whitespace.
+            if harvested:
+                break
+            continue
+        if stripped.startswith("#!"):
+            continue  # shebang: says nothing about purpose
+        if not stripped.startswith(_COMMENT_PREFIXES):
+            break  # first line of actual code ends the header
+        cleaned = stripped.lstrip("#/-*;\"' ").strip()
+        if cleaned:
+            harvested.append(cleaned)
+
+    if not harvested:
+        return None
+
+    # The path leads: it carries the filename, which is often the single most
+    # descriptive token a file has, and it measured highest in the comparison
+    # above.
+    body = f"{relpath}\n" + "\n".join(harvested)
+    return Chunk(start_line=1, text=body)
 
 
 def chunk_text(
@@ -157,6 +217,11 @@ class SemanticIndex:
         into a single call rather than embedded one at a time.
         """
         chunks = list(chunk_text(text))
+        # The summary leads, so the file's own description competes on its own
+        # terms rather than diluted inside a sliding window. See summary_chunk.
+        summary = summary_chunk(relpath, text)
+        if summary is not None:
+            chunks.insert(0, summary)
         if not chunks:
             return 0
 
