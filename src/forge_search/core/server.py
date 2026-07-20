@@ -74,6 +74,8 @@ class ForgeSearch:
     reranker: Reranker | None = None
     weights: ArmWeights = field(default_factory=ArmWeights)
     mode: str = SearchMode.HYBRID
+    #: Where indexes live. None = shared OS cache dir. See cache.index_dir_for.
+    index_dir: str | None = None
     _indexes: dict[str, HybridIndex] = field(default_factory=dict, init=False)
 
     # -- index lifecycle ---------------------------------------------------
@@ -87,6 +89,7 @@ class ForgeSearch:
                 reranker=self.reranker,
                 config=self.config,
                 weights=self.weights,
+                index_dir=self.index_dir,
             )
             self._indexes[root.label] = index
         return index

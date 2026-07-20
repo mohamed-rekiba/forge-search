@@ -42,9 +42,9 @@ caused by an optimisation that was right in the abstract and wrong in effect.
 ## Install
 
 ```bash
-uv tool install forge-search              # lexical search
-uv tool install 'forge-search[semantic]'  # + semantic (adds an embedding model)
-uv tool install --with semantic .         # + semantic (install local package)
+uv tool install forge-search                     # lexical search
+uv tool install 'forge-search[semantic]'         # + semantic (adds an embedding model)
+uv tool install --force --editable '.[semantic]' # + semantic (install local package)
 ```
 
 Requires Python 3.14+. No compiler: both native dependencies ship prebuilt
