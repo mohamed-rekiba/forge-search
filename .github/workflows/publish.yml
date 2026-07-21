@@ -17,6 +17,21 @@ on:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
       - "v[0-9]+.[0-9]+.[0-9]+-*"   # pre-releases: v0.2.0-rc.1
+  # Manual trigger, and NOT a convenience. release-please creates its tag
+  # using the default GITHUB_TOKEN, and GitHub deliberately does not start new
+  # workflow runs from events raised by that token — so the tag push above
+  # will not fire this workflow when the release PR is merged. Without this
+  # entry the release chain would end silently at a tag with nothing
+  # published, which looks identical to success.
+  #
+  # To make the chain fully automatic, give release-please a PAT (or a GitHub
+  # App token) instead of GITHUB_TOKEN in release-please.yml.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish (e.g. v0.2.0)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -31,6 +46,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          # On a manual run, check out the tag being published rather than the
+          # default branch — otherwise this would build whatever main happens
+          # to hold and publish it under the tag's version.
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - uses: astral-sh/setup-uv@v8.3.2
         with:
           version: ${{ env.UV_VERSION }}
@@ -40,8 +60,11 @@ jobs:
         # A tag that disagrees with the packaged version publishes something
         # nobody can reproduce from the tag. Cheap to check, expensive to
         # discover after release — PyPI will not let a version be replaced.
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          raw="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          tag="${raw#v}"
           pkg="$(uv run python -c 'import tomllib,pathlib;print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           if [ "$tag" != "$pkg" ]; then
             echo "tag $tag does not match pyproject version $pkg"; exit 1

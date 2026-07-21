@@ -43,5 +43,7 @@ suite has never once caught one of them.
 ## Pre-merge
 
 - [ ] Under ~400 lines, or justified
-- [ ] Conventional-commit messages
+- [ ] Conventional-commit messages — release-please builds the CHANGELOG and
+      the version bump from these, so a `feat:` that lands as `chore:` is a
+      release that never happens
 - [ ] README / BENCHMARK updated if behaviour or numbers changed
