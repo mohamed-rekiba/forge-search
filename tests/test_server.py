@@ -192,3 +192,97 @@ class TestReindexTool:
         mcp = search.build()
         with pytest.raises(ToolError, match="unknown project"):
             asyncio.run(mcp.call_tool("reindex", {"project": "nope"}))
+
+
+class TestDynamicRootDiscovery:
+    """A project registered after the server started must be reachable without
+    a restart. The root set is not fixed for the life of the server: an adapter
+    over a portfolio re-reads its registry, so a new clone should be found the
+    first time it is named. Requiring a restart would be exactly the "rely on a
+    human to remember" convention that freshness-on-read exists to remove.
+    """
+
+    def _make(self, tmp_path: Path, roots: list[Root], *, resolver=None) -> ForgeSearch:
+        return ForgeSearch(roots=list(roots), root_resolver=resolver)
+
+    def test_a_project_added_after_startup_is_found_on_first_reference(
+        self, tmp_path: Path
+    ) -> None:
+        alpha = tmp_path / "alpha"
+        alpha.mkdir()
+        (alpha / "a.py").write_text("def alpha_symbol():\n    pass\n")
+        beta = tmp_path / "beta"
+        beta.mkdir()
+        (beta / "b.py").write_text("def beta_symbol():\n    pass\n")
+
+        # The server starts knowing only alpha; beta is "registered" later by
+        # the resolver returning it on the next call.
+        current = [Root(label="alpha", path=alpha)]
+
+        def resolver() -> list[Root]:
+            return [Root(label="alpha", path=alpha), Root(label="beta", path=beta)]
+
+        fs = self._make(tmp_path, current, resolver=resolver)
+        try:
+            result = fs._search("beta_symbol", project="beta", top_k=10, doc_only=False)
+            assert {r["project"] for r in result["results"]} == {"beta"}
+        finally:
+            fs.close()
+
+    def test_discovered_root_persists_for_later_search_all(self, tmp_path: Path) -> None:
+        """Once discovered by name, the new root joins the set — a subsequent
+        search-all includes it, without another re-resolution."""
+        alpha = tmp_path / "alpha"
+        alpha.mkdir()
+        (alpha / "a.py").write_text("def shared_symbol():\n    pass\n")
+        beta = tmp_path / "beta"
+        beta.mkdir()
+        (beta / "b.py").write_text("def shared_symbol():\n    pass\n")
+
+        calls = {"n": 0}
+
+        def resolver() -> list[Root]:
+            calls["n"] += 1
+            return [Root(label="alpha", path=alpha), Root(label="beta", path=beta)]
+
+        fs = self._make(tmp_path, [Root(label="alpha", path=alpha)], resolver=resolver)
+        try:
+            fs._search("shared_symbol", project="beta", top_k=10, doc_only=False)
+            result = fs._search("shared_symbol", project=None, top_k=10, doc_only=False)
+            assert {r["project"] for r in result["results"]} == {"alpha", "beta"}
+            assert calls["n"] == 1, "root set should re-resolve once, not per call"
+        finally:
+            fs.close()
+
+    def test_genuinely_unknown_project_still_raises_after_reresolution(
+        self, tmp_path: Path
+    ) -> None:
+        """Re-resolution is a chance to discover, not a licence to widen: a name
+        no resolver knows must still fail loudly, naming the known roots."""
+        alpha = tmp_path / "alpha"
+        alpha.mkdir()
+        (alpha / "a.py").write_text("x = 1\n")
+
+        def resolver() -> list[Root]:
+            return [Root(label="alpha", path=alpha)]
+
+        fs = self._make(tmp_path, [Root(label="alpha", path=alpha)], resolver=resolver)
+        try:
+            with pytest.raises(ValueError, match="unknown project 'ghost'"):
+                fs._search("x", project="ghost", top_k=10, doc_only=False)
+        finally:
+            fs.close()
+
+    def test_no_resolver_means_no_reresolution(self, tmp_path: Path) -> None:
+        """A standalone server with an explicit --root has a fixed set. Absent a
+        resolver, an unknown project fails immediately — no discovery attempt."""
+        alpha = tmp_path / "alpha"
+        alpha.mkdir()
+        (alpha / "a.py").write_text("x = 1\n")
+
+        fs = ForgeSearch(roots=[Root(label="alpha", path=alpha)])
+        try:
+            with pytest.raises(ValueError, match="unknown project"):
+                fs._search("x", project="beta", top_k=10, doc_only=False)
+        finally:
+            fs.close()
