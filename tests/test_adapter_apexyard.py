@@ -248,11 +248,14 @@ def test_adapter_can_move_the_default_index_dir(tmp_path):
         def expand(self, root):
             return [root]
 
-    assert resolve_roots(
-        [Root(label="a", path=tmp_path)],
-        adapters=[Central()],
-        adapter_name="central",
-    ).index_dir == ".indexes"
+    assert (
+        resolve_roots(
+            [Root(label="a", path=tmp_path)],
+            adapters=[Central()],
+            adapter_name="central",
+        ).index_dir
+        == ".indexes"
+    )
 
 
 def test_no_adapter_means_no_preference(tmp_path):

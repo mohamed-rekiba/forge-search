@@ -1,0 +1,33 @@
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels: [dependencies]
+    commit-message:
+      prefix: "chore(deps):"
+    groups:
+      # The semantic arm's three dependencies move together and are the only
+      # ones that can break the index rather than the build — a new ONNX
+      # runtime or tokenizer can change embeddings, which the index's model
+      # fingerprint will (correctly) treat as a rebuild. Grouping them keeps
+      # that in one reviewable PR.
+      semantic-stack:
+        patterns: ["onnxruntime", "sqlite-vec", "tokenizers"]
+      dev-tooling:
+        patterns: ["ruff", "pytest*"]
+      # The `pydantic-stack` group from the original was dropped: this
+      # package has no pydantic dependency.
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: [ci]
+    commit-message:
+      prefix: "ci(deps):"

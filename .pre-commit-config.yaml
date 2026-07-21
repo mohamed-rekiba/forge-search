@@ -1,0 +1,55 @@
+# Adapted from a monorepo config. Scope and paths changed; the checkers are
+# configured in pyproject.toml against `src` only, and are not --strict —
+# every bug this project shipped was a silent behavioural gap no checker
+# would have caught, so they earn their place on the CLI-to-server seam
+# rather than as a rigour claim.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+        # An index or an ONNX model committed by accident is exactly the
+        # failure `.forge_search/.gitignore` exists to prevent; this is the
+        # backstop for anyone who redirects --index-dir somewhere unguarded.
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-ast
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: [--branch, main, --branch, master]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.14
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+      - id: pyright
+        name: pyright
+        entry: uv run pyright
+        language: system
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      # Default ruleset — the .gitleaks.toml the original config pointed at
+      # belonged to the other repo and does not exist here.
+      - id: gitleaks

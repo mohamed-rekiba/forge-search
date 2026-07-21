@@ -1,0 +1,82 @@
+name: Publish
+
+# Publishes to PyPI when a version tag is pushed (`v0.2.0`).
+#
+# One package, so the tag is just the version — the original's
+# `<package>-v<version>` scheme and its package-picking dispatch input
+# existed to disambiguate seven workspace members and are not needed here.
+#
+# Authentication is PyPI Trusted Publishing (OIDC): no token is stored
+# anywhere in this repo. The PyPI project must list this repository, this
+# workflow filename, and the `pypi` environment as a Trusted Publisher before
+# the first publish can succeed — until then the upload is rejected by PyPI,
+# which is the correct fail-closed behaviour.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"   # pre-releases: v0.2.0-rc.1
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.14"
+  UV_VERSION: "0.11.16"
+
+jobs:
+  build:
+    name: Build and verify
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Tag must match the version in pyproject.toml
+        # A tag that disagrees with the packaged version publishes something
+        # nobody can reproduce from the tag. Cheap to check, expensive to
+        # discover after release — PyPI will not let a version be replaced.
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(uv run python -c 'import tomllib,pathlib;print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag $tag does not match pyproject version $pkg"; exit 1
+          fi
+
+      - run: uv build --out-dir dist
+
+      - name: The built wheel must actually run
+        # The same reasoning as CI's smoke job, and it matters more here:
+        # this artifact is the one strangers install.
+        run: |
+          uv venv .smoke
+          VIRTUAL_ENV=.smoke uv pip install "$(ls dist/*.whl | head -1)"
+          .smoke/bin/forge-search --help > /dev/null
+          mkdir -p corpus && echo "validate_token" > corpus/a.md
+          .smoke/bin/forge-search search validate_token --root corpus | grep -q a.md
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-24.04
+    needs: build
+    environment:
+      name: pypi
+      url: https://pypi.org/p/forge-search
+    permissions:
+      id-token: write  # required for Trusted Publishing; no token needed
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

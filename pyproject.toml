@@ -36,6 +36,8 @@ http = [
 
 [dependency-groups]
 dev = [
+    "mypy>=2.3.0",
+    "pyright>=1.1.411",
     "pytest>=9.1.1",
     "ruff>=0.15.22",
 ]
@@ -60,3 +62,35 @@ target-version = "py314"
 # and no linter would have caught any of them. Lint keeps the source tidy; the
 # test suite and the clean-install acceptance test do the real work.
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+# `src` only. Both checkers are clean here; the errors they raise in `tests`
+# are all narrowing limitations (an Optional proven non-None by a preceding
+# assertion, unions from the MCP SDK's content types) rather than defects.
+# Silencing those one by one would add noise to the tests to satisfy a tool,
+# and the tests are verified by running, not by inference.
+files = ["src"]
+python_version = "3.14"
+# Not --strict. The position in [tool.ruff.lint] applies here too: every bug
+# this project shipped was a silent behavioural gap no checker would have
+# caught. What type checking IS good for here is the seam between CLI and
+# server — untyped plumbing there already shipped a startup crash, a keyword
+# argument passed to a dataclass with no such field.
+warn_unused_ignores = true
+warn_redundant_casts = true
+# `warn_unreachable` is deliberately off: it flags the Windows branch of
+# cache_root() as dead when checked on macOS, and the macOS branch when
+# checked on Linux. Correct cross-platform code always has a dead branch
+# somewhere, so the warning is noise wherever it runs.
+
+# Neither ships type information. Stubbing them would mean maintaining a
+# description of someone else's API; the calls are few and covered by tests.
+[[tool.mypy.overrides]]
+module = ["onnxruntime.*", "sqlite_vec.*", "tokenizers.*", "mcp.*"]
+ignore_missing_imports = true
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.14"
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false

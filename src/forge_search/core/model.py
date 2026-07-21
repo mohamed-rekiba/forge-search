@@ -166,8 +166,18 @@ def download(
             continue
 
         progress(f"  {filename}: downloading…")
+        # Enforce https rather than assert it in a comment. Every URL here is
+        # code-controlled today, so this can only fire if a future model spec
+        # introduces `file://`, `http://`, or a custom scheme — at which point
+        # urlopen would silently read a local path or an unauthenticated
+        # source and write it into the model directory as if it were the real
+        # model. A one-line check turns that into a startup error.
+        if not url.lower().startswith("https://"):
+            raise RuntimeError(
+                f"refusing to fetch {filename} over a non-https URL: {url}"
+            )
         try:
-            with urllib.request.urlopen(url) as response:  # noqa: S310 - fixed https URL
+            with urllib.request.urlopen(url) as response:  # noqa: S310  # nosec B310 - scheme checked above
                 with tempfile.NamedTemporaryFile(
                     dir=directory, delete=False, suffix=".partial"
                 ) as tmp:

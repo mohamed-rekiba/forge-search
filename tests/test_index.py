@@ -68,9 +68,7 @@ class TestIndexing:
         assert second.up_to_date
         assert second.files_indexed == 0
 
-    def test_index_lives_in_the_tree_and_is_excluded_from_it(
-        self, repo: Root
-    ) -> None:
+    def test_index_lives_in_the_tree_and_is_excluded_from_it(self, repo: Root) -> None:
         """In-tree by default, and never indexed by itself.
 
         This inverts an earlier decision. The index used to live in a shared
