@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/mohamed-rekiba/forge-search/compare/v0.4.1...v0.4.2) (2026-07-21)
+
+
+### Bug Fixes
+
+* discover roots registered after server startup ([a760851](https://github.com/mohamed-rekiba/forge-search/commit/a760851676a89b451cdde2b49c2bf2f6f10846d1))
+
 ## [0.4.1](https://github.com/mohamed-rekiba/forge-search/compare/v0.4.0...v0.4.1) (2026-07-21)
 
 
