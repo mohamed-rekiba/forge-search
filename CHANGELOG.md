@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.1](https://github.com/mohamed-rekiba/forge-search/compare/v0.4.0...v0.4.1) (2026-07-21)
+
+
+### Refactors
+
+* update workspace path handling for compatibility ([82525eb](https://github.com/mohamed-rekiba/forge-search/commit/82525eb425b1c889ba90a2acf517594bf3d2fc08))
+
+
+### Documentation
+
+* add install-from-source command ([b5e0786](https://github.com/mohamed-rekiba/forge-search/commit/b5e0786ddd6366ba0849c764a6dd5202ef47ee9b))
+* split the README into a front door and a documentation set ([4c8a96b](https://github.com/mohamed-rekiba/forge-search/commit/4c8a96b5e0caefcb4bfeec82cffe17290958bf01))
+
 ## [0.4.0](https://github.com/mohamed-rekiba/forge-search/compare/v0.3.0...v0.4.0) (2026-07-21)
 
 
