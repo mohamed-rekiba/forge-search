@@ -100,6 +100,13 @@ class RootProvider:
     #: The name `--adapter` selects this by.
     name: str = ""
 
+    #: Where this integration wants indexes, overriding the default
+    #: `.forge_search` per root. An adapter knows the shape of the tree it
+    #: expands — a portfolio of many project clones may want one shared
+    #: directory rather than one per clone — and the caller usually does not.
+    #: An explicit `--index-dir` still wins; this only moves the default.
+    index_dir: str | None = None
+
     def expand(self, root: Root) -> Sequence[Root]:  # pragma: no cover - interface
         """Turn one root into the roots it actually contains."""
         return [root]
@@ -116,6 +123,9 @@ class Resolution:
 
     roots: tuple[Root, ...]
     expansions: tuple[tuple[str, str, int], ...] = ()  # (adapter, given label, count)
+    #: Index location preferred by the active adapter, if it named one.
+    #: Advisory: an explicit `--index-dir` overrides it.
+    index_dir: str | None = None
 
     #: The adapter named by `--adapter`, if any. Recorded even when it
     #: expanded nothing: "which adapter is active" is a question the operator
@@ -189,4 +199,9 @@ def resolve_roots(
                 (chosen.name or type(chosen).__name__, root.label, len(expanded))
             )
 
-    return Resolution(tuple(resolved), tuple(expansions), adapter=adapter_name)
+    return Resolution(
+        tuple(resolved),
+        tuple(expansions),
+        adapter=adapter_name,
+        index_dir=chosen.index_dir if chosen else None,
+    )

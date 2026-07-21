@@ -145,6 +145,20 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
     return list(resolution.roots)
 
 
+def _index_dir(args: argparse.Namespace) -> str | None:
+    """Where indexes go, most explicit wins.
+
+    `--index-dir` > the active adapter's preference > `.forge_search` per
+    root. The adapter only moves the default, because it knows the shape of
+    the tree it expanded; it never overrides something the caller stated.
+    """
+    explicit = getattr(args, "index_dir", None)
+    if explicit:
+        return explicit
+    resolution = _LAST_RESOLUTION.get("value")
+    return getattr(resolution, "index_dir", None)
+
+
 def _embedder(args: argparse.Namespace):
     """Resolve an embedder, or None for lexical-only.
 
@@ -250,7 +264,7 @@ def _cmd_bench(args: argparse.Namespace) -> int:
         roots[0],
         embedder=_embedder(args),
         reranker=_reranker(args),
-        index_dir=args.index_dir,
+        index_dir=_index_dir(args),
     ) as index:
         index.reindex()
         print(run_bench(index, queries, top_k=args.top_k).render())
@@ -266,7 +280,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         server_name=args.name,
         embedder=_embedder(args),
         reranker=_reranker(args),
-        index_dir=args.index_dir,
+        index_dir=_index_dir(args),
         summary=resolution.describe() if resolution else None,
     )
     try:
@@ -278,7 +292,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
 def _cmd_index(args: argparse.Namespace) -> int:
     for root in _resolve_roots(args):
-        with LexicalIndex(root, index_dir=args.index_dir) as index:
+        with LexicalIndex(root, index_dir=_index_dir(args)) as index:
             stats = index.reindex(force=args.force)
             state = (
                 "up to date"

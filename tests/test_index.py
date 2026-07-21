@@ -16,6 +16,7 @@ import pytest
 from forge_search.core.cache import index_path_for
 from forge_search.core.index import LexicalIndex
 from forge_search.core.roots import Root
+from forge_search.core.traversal import DEFAULT_EXCLUDES
 
 
 @pytest.fixture(autouse=True)
@@ -67,10 +68,21 @@ class TestIndexing:
         assert second.up_to_date
         assert second.files_indexed == 0
 
-    def test_index_lives_outside_the_searched_tree(self, repo: Root) -> None:
-        """An index inside the tree would be indexed by the next run."""
+    def test_index_lives_in_the_tree_and_is_excluded_from_it(
+        self, repo: Root
+    ) -> None:
+        """In-tree by default, and never indexed by itself.
+
+        This inverts an earlier decision. The index used to live in a shared
+        cache specifically so it could not be indexed or committed; it moved
+        in-tree because a cache keyed by a path hash orphans an index the
+        moment a project is deleted or renamed — silently, and forever. The
+        traversal exclusion is what makes the new default safe, so it is
+        asserted here rather than left implied.
+        """
         db = index_path_for(repo.label, repo.path)
-        assert repo.path not in db.parents
+        assert repo.path in db.parents
+        assert ".forge_search" in DEFAULT_EXCLUDES
 
     def test_roots_with_same_label_do_not_collide(self, tmp_path: Path) -> None:
         a = Root(label="docs", path=tmp_path / "a")
@@ -341,10 +353,32 @@ def test_in_tree_index_is_never_indexed_by_itself(tmp_path):
         assert not any(".forge_search" in h.path for h in ix.search("hello", limit=50))
 
 
-def test_default_still_uses_the_shared_cache(tmp_path, monkeypatch):
-    cache = tmp_path / "cache"
-    monkeypatch.setenv("FORGE_SEARCH_CACHE_DIR", str(cache))
+def test_an_absolute_index_dir_opts_back_into_a_shared_directory(tmp_path):
+    # The shared cache is no longer the default, but it must stay
+    # reachable — it is the right choice for trees you cannot write to.
+    shared = tmp_path / "cache"
+    (tmp_path / "a.md").write_text("hello\n")
+    with LexicalIndex(Root(label="p", path=tmp_path), index_dir=str(shared)) as ix:
+        assert ix.db_path.parent == shared
+        assert not (tmp_path / ".forge_search").exists()
+
+
+def test_index_dir_ignores_itself(tmp_path):
+    # The in-tree default writes into repos forge-search does not own, so it
+    # must not become someone's accidental commit — and asking every user to
+    # remember a .gitignore entry is the kind of remembering this project
+    # exists to remove.
     (tmp_path / "a.md").write_text("hello\n")
     with LexicalIndex(Root(label="p", path=tmp_path)) as ix:
-        assert ix.db_path.parent == cache
-        assert not (tmp_path / ".forge_search").exists()
+        ix.reindex()
+    assert (tmp_path / ".forge_search" / ".gitignore").read_text() == "*\n"
+
+
+def test_an_existing_gitignore_is_not_clobbered(tmp_path):
+    (tmp_path / "a.md").write_text("hello\n")
+    d = tmp_path / ".forge_search"
+    d.mkdir()
+    (d / ".gitignore").write_text("# hand-edited\n*\n")
+    with LexicalIndex(Root(label="p", path=tmp_path)) as ix:
+        ix.reindex()
+    assert "hand-edited" in (d / ".gitignore").read_text()

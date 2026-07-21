@@ -282,38 +282,50 @@ and if that holds, delete the arm rather than carrying it.
 
 ## Indexes
 
-One SQLite file per root. Two places it can live, and neither is strictly
-better:
+One SQLite file per root, in **`<project>/.forge_search/`** by default.
 
-**Shared cache directory (default)** — `~/Library/Caches/forge-search` on
-macOS, `$XDG_CACHE_HOME/forge-search` on Linux, `%LOCALAPPDATA%` on Windows.
-Nothing is written into trees you may not control and nothing can be committed
-by accident. The cost is orphans: the filename is a hash of the root path, so
-deleting, moving, or renaming a project leaves its index behind forever, and
-you cannot tell from the filename which project it belonged to.
-
-**In-tree** — `--index-dir .forge_search` puts it beside the code, where it is
-obvious to find and is deleted along with the project. Two costs: you must
-gitignore it, and it would be indexed by the next run if traversal did not
-exclude `.forge_search` by default (it does — that exclusion is what makes
-this option safe).
-
-```bash
-forge-search serve --root /abs/path --index-dir .forge_search
-echo '.forge_search/' >> .gitignore
+```text
+your-project/
+  .forge_search/
+    your-project.db
+    .gitignore        ← contains "*", so the directory ignores itself
 ```
 
-An absolute `--index-dir` is used as-is; a relative one is resolved per root,
-so several roots each get their own.
+The index lives and dies with the project. Delete the project and its index
+goes with it; nothing accumulates anywhere else.
 
-`FORGE_SEARCH_CACHE_DIR` overrides the default location. Indexes are safe to
-delete at any time; the next search rebuilds.
+This reverses an earlier default, and the reasoning is worth stating because
+the original argument was not wrong. A shared OS cache directory keeps
+forge-search from writing into repositories it does not own — but it keys each
+index by a hash of the root path, so deleting, moving, or renaming a project
+orphans its index forever, with nothing in the filename to identify it.
+Nothing collects them and nothing announces the leak. The machine this was
+written on had ~600 MB of orphans before anyone looked.
 
-Indexes carry a schema version. When it changes, the index is discarded and
-rebuilt rather than migrated in place — a targeted migration that misses one
-table leaves the index looking healthy while silently missing a capability,
-which is a failure this project has already shipped twice. A rebuild costs
-seconds; a silently incomplete index costs correctness indefinitely.
+The two real objections to in-tree storage are answered rather than accepted:
+
+| Objection | Answer |
+|---|---|
+| It gets committed | The directory ships a `.gitignore` containing `*`, so it ignores itself and its contents. Nothing to remember, invisible to `git status`. |
+| It indexes itself | `.forge_search` is excluded by traversal, so a search can never match the index's own bytes. |
+
+**Somewhere else instead** — an absolute `--index-dir` opts back into a single
+shared directory, which is still right for trees you cannot write to:
+
+```bash
+forge-search serve --root /abs/path --index-dir ~/.cache/forge-search
+```
+
+There the path hash comes back, since one directory holding many roots cannot
+tell two projects that share a label apart. A *relative* `--index-dir` is
+resolved per root, so each root gets its own.
+
+An adapter can move the default too — a portfolio of many project clones may
+want one directory rather than one per clone. Precedence is
+`--index-dir` > adapter > `.forge_search`; an adapter only changes the
+default, never something you stated.
+
+Indexes are safe to delete at any time; the next search rebuilds.
 
 ## Known limitation
 

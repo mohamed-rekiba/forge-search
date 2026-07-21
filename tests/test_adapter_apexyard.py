@@ -235,3 +235,25 @@ def test_a_no_op_expansion_is_not_reported():
     )
     assert res.expansions == ()
     assert "expanded" not in res.describe()
+
+
+def test_adapter_can_move_the_default_index_dir(tmp_path):
+    # A portfolio adapter expands one root into many project clones, and may
+    # want one index directory rather than one per clone. It knows the shape
+    # of the tree it expanded; the caller usually does not.
+    class Central(RootProvider):
+        name = "central"
+        index_dir = ".indexes"
+
+        def expand(self, root):
+            return [root]
+
+    assert resolve_roots(
+        [Root(label="a", path=tmp_path)],
+        adapters=[Central()],
+        adapter_name="central",
+    ).index_dir == ".indexes"
+
+
+def test_no_adapter_means_no_preference(tmp_path):
+    assert resolve_roots([Root(label="a", path=tmp_path)]).index_dir is None

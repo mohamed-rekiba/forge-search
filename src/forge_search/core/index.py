@@ -21,7 +21,7 @@ import sqlite3
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from .cache import index_path_for
+from .cache import ensure_index_dir, index_path_for
 from .query import QueryError, to_fts5
 from .roots import Root
 from .traversal import TraversalConfig, excerpt, walk
@@ -126,7 +126,7 @@ class LexicalIndex:
         self.root = root
         self.config = config or TraversalConfig()
         self.db_path = index_path_for(root.label, root.path, index_dir)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_index_dir(self.db_path.parent)
         self._conn = sqlite3.connect(self.db_path)
         self._conn.executescript(_SCHEMA)
         self._conn.commit()

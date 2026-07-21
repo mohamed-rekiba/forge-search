@@ -2,7 +2,6 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
-.forge_search/
 *.py[oc]
 build/
 dist/
