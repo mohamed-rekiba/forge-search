@@ -138,11 +138,11 @@ def test_server_starts_with_index_dir(project):
         client.close()
 
 
-def test_startup_stderr_is_silent(project):
-    # Every stderr line is rendered as `[warning]` by MCP clients. A line
-    # printed on every launch is therefore a permanent false warning, which
-    # trains the operator to ignore the log — so a real one gets ignored too.
-    # The roots summary moved into the MCP instructions instead.
+def test_startup_reports_roots_on_stderr(project):
+    # stderr is the only channel proven to reach a VS Code MCP output panel.
+    # It is labelled `[warning]` there, which is the client's doing — stderr
+    # carries no severity for it to read. Visible and mislabelled beats
+    # correctly-labelled and invisible.
     client = Client("--root", str(project), cwd=str(project))
     try:
         client.handshake()
@@ -152,16 +152,19 @@ def test_startup_stderr_is_silent(project):
     finally:
         err = client.close()
 
-    assert err.strip() == "", f"unexpected stderr chatter:\n{err}"
+    assert "forge-search: roots:" in err
+    # Still nothing else — the SDK's per-request INFO chatter stays off.
+    assert "Processing request of type" not in err
+    assert "Traceback" not in err
 
 
-def test_verbose_restores_the_stderr_line(project):
-    client = Client("--root", str(project), "--verbose", cwd=str(project))
+def test_quiet_suppresses_the_stderr_line(project):
+    client = Client("--root", str(project), "--quiet", cwd=str(project))
     try:
         client.handshake()
     finally:
         err = client.close()
-    assert "forge-search: roots:" in err
+    assert err.strip() == ""
 
 
 def test_config_is_announced_as_info_not_a_stderr_warning(project):
@@ -182,7 +185,7 @@ def test_config_is_announced_as_info_not_a_stderr_warning(project):
     text = logs[0]["params"]["data"]
     assert str(project) in text
     assert "adapter: apexyard" in text
-    assert err.strip() == ""
+    assert "forge-search: roots:" in err
 
 
 def test_instructions_name_the_roots_and_adapter(project):

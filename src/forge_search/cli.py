@@ -272,7 +272,16 @@ def _cmd_bench(args: argparse.Namespace) -> int:
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
-    args.quiet_roots = True
+    # Print to stderr unless explicitly silenced. This is the ONLY channel
+    # proven to reach a VS Code MCP output panel — its own logs show
+    # `[warning] [server stderr] …`, so stderr arrives; a notifications/message
+    # at level `info` did not appear at all across three attempts.
+    #
+    # The `[warning]` label is the client's, not ours: stderr carries no
+    # severity, so a client has nothing to derive one from. Visible and
+    # mislabelled beats correctly-labelled and invisible — an operator who
+    # cannot see which root is indexed has no way to catch the wrong tree.
+    args.quiet_roots = getattr(args, "quiet", False)
     roots = _resolve_roots(args)
     resolution = _LAST_RESOLUTION.get("value")
     search = ForgeSearch(
@@ -376,11 +385,12 @@ def main(argv: list[str] | None = None) -> int:
     _add_root_args(serve)
     serve.add_argument("--name", default=DEFAULT_SERVER_NAME, help="MCP server name")
     serve.add_argument(
-        "--verbose",
+        "--quiet",
         action="store_true",
         help=(
-            "Print the resolved roots to stderr at startup. Off by default "
-            "because MCP clients render every stderr line as a warning."
+            "Do not print the resolved roots to stderr at startup. Clients "
+            "label all stderr as a warning; this silences it at the cost of "
+            "not being able to see which tree is indexed."
         ),
     )
     serve.add_argument(
