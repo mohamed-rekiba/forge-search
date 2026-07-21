@@ -82,6 +82,7 @@ class ForgeSearch:
     summary: str | None = None
     _indexes: dict[str, HybridIndex] = field(default_factory=dict, init=False)
     _announced: bool = field(default=False, init=False)
+    _min_log_level: str = field(default="info", init=False)
 
     # -- index lifecycle ---------------------------------------------------
 
@@ -189,6 +190,19 @@ class ForgeSearch:
             ),
         )
 
+        # Advertise the `logging` capability. The SDK only declares it when a
+        # logging/setLevel handler is registered, and FastMCP registers none —
+        # so without this the server sends notifications/message that a
+        # spec-compliant client is entitled to drop, and VS Code does exactly
+        # that. The notification looked correct on the wire and still reached
+        # nobody.
+        @mcp._mcp_server.set_logging_level()
+        async def _set_level(level: str) -> None:
+            # Honoured for real: a client asking for `warning` should not keep
+            # receiving `info`. Accepting the request and ignoring it would be
+            # its own quiet lie.
+            self._min_log_level = level
+
         @mcp.tool(
             name="search_code",
             title="Search code",
@@ -290,6 +304,12 @@ class ForgeSearch:
         a request arrives. So it rides the first tool call, once.
         """
         if self._announced or not self.summary:
+            return
+        # Ordered by severity; anything below the client's requested level is
+        # dropped rather than sent and ignored.
+        levels = ("debug", "info", "notice", "warning", "error", "critical", "alert")
+        if levels.index("info") < levels.index(self._min_log_level):
+            self._announced = True
             return
         self._announced = True
         try:

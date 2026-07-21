@@ -199,3 +199,39 @@ def test_instructions_name_the_roots_and_adapter(project):
     # The adapter is named even though it expanded nothing: "which adapter is
     # active" is a question the operator asked by passing the flag.
     assert "adapter: apexyard" in instructions
+
+
+def test_logging_capability_is_advertised(project):
+    # Without this, notifications/message may be dropped by a spec-compliant
+    # client — which is what VS Code does. The notification was being sent
+    # correctly and reaching nobody.
+    client = Client("--root", str(project), cwd=str(project))
+    try:
+        caps = client.handshake()["result"]["capabilities"]
+    finally:
+        client.close()
+    assert "logging" in caps
+
+
+def test_set_level_is_honoured_not_just_accepted(project):
+    # Accepting logging/setLevel and then ignoring it would be its own quiet
+    # lie: a client asking for `warning` must stop receiving `info`.
+    client = Client("--root", str(project), cwd=str(project))
+    try:
+        client.handshake()
+        client.send(
+            {
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "logging/setLevel",
+                "params": {"level": "warning"},
+            }
+        )
+        client.read()
+        client.call("search_code", query="tokens", top_k=5)
+    finally:
+        client.close()
+
+    assert not [
+        n for n in client.notifications if n.get("method") == "notifications/message"
+    ]
