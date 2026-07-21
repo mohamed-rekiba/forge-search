@@ -1,10 +1,22 @@
 # forge-search
 
-Local code and docs search over one or many repositories, served as an MCP tool.
+Local code and docs search over one or many repositories, served as an MCP
+tool.
 
 Point it at a directory and it works. Point it at several and it searches them
 together, returning ranked excerpts with the project, relative path, and line
-number.
+number. Everything runs on your machine; nothing is uploaded.
+
+```bash
+uv tool install 'forge-search[semantic]'
+forge-search warm
+forge-search search "how do tokens get validated" --root ~/code/api --semantic
+```
+
+```text
+api/src/auth.py:42: def validate_token(token: str) -> Claims:
+api/docs/sessions.md:18: ## Token lifetime and refresh
+```
 
 ## Why it exists
 
@@ -20,40 +32,34 @@ exist". A caller acts on the false negative with full confidence.
 | Line-length limits replacing the match with a placeholder | The matched text **destroyed**, not shortened |
 | Absolute index roots going stale on move or re-clone | Server fails to launch; **every search silently returns nothing** |
 
-Each is fixed here as a **default**, not an option — because every one of them
-was already fixable by passing the right flag, and nobody did. Correctness that
-depends on remembering a flag is not correctness.
+Each is fixed as a **default**, not an option — because every one was already
+fixable by passing the right flag, and nobody did. Correctness that depends on
+remembering a flag is not correctness.
 
-Building it turned up five more of the same shape, every one self-inflicted and
-every one found by running against real content rather than by the test suite:
-
-| Found | What happened |
-|---|---|
-| Hyphenated queries | `require-active-ticket` raised `no such column: active` — the full-text engine read the hyphens as syntax. The error was caught and returned as an empty list. Valid query, real matches present, zero results, no error. |
-| Semantic backfill | Enabling the semantic arm on an existing index left it permanently empty: the lexical arm reported no changes, so nothing was built. Hybrid degraded to lexical, so nothing looked wrong. |
-| Filename lookup | Two files were unfindable by name because neither contains its own filename — a content-only index cannot reach them. |
-| Version guard | The guard added to catch the above only cleared indexes that already had a version stamp. An *unstamped* index is precisely a pre-versioning one, so it stamped the current version onto stale data and made the gap permanent. |
-| Bad stamp | That buggy guard had already mis-stamped a real index, which the fixed code then correctly skipped. Only a version bump gets past a bad stamp. |
-
-The consistency of that pattern is the reason `bench` exists, and the reason
-the codebase prefers blunt mechanisms over clever ones. Three of the five were
-caused by an optimisation that was right in the abstract and wrong in effect.
+That principle runs through everything here: a malformed query raises instead
+of returning an empty list, an unreadable root is reported instead of dropped,
+and an index built by a different model discards itself instead of returning
+confident nonsense. The full record, including six more bugs of the same shape
+found while building it, is in [docs/decisions.md](docs/decisions.md).
 
 ## Install
 
 ```bash
-uv tool install forge-search                     # lexical search
-uv tool install 'forge-search[semantic]'         # + semantic (adds an embedding model)
-uv tool install --force --editable '.[semantic]' # + semantic (install local package)
+uv tool install forge-search              # lexical search
+uv tool install 'forge-search[semantic]'  # + semantic (adds an embedding model)
 ```
 
-Requires Python 3.14+. No compiler: both native dependencies ship prebuilt
+Requires Python 3.14+. No compiler — both native dependencies ship prebuilt
 wheels for cp314.
+
+> Note the **brackets**. `--with semantic` installs an unrelated PyPI package
+> that happens to be named `semantic`, leaving the arm dead with
+> `No module named 'onnxruntime'`.
 
 ## Use
 
 ```bash
-# One-shot search — the fastest way to check it behaves
+# One-shot search — the fastest way to check behaviour
 forge-search search "validate_token" --root /abs/path/to/project
 forge-search search "require-active-ticket" --root api=~/code/api --top-k 5
 forge-search search "authentication" --root ~/code/api --docs   # prose only
@@ -62,17 +68,13 @@ forge-search search "authentication" --root ~/code/api --docs   # prose only
 forge-search index --root api=~/code/api
 
 # Run as an MCP server
-forge-search serve --root api=~/code/api
+forge-search serve --root api=~/code/api --semantic
 ```
 
-**`--root` is required. Nothing is discovered.**
-
-There is no walk-up, no working-directory inference, no marker sniffing, and
-no fallback guess. Inferring the root *wrongly* is silent — the wrong tree
-gets indexed and every search returns plausible results from somewhere you did
-not ask about. An absolute path cannot do that.
-
-Omitting `--root` prints the three correct forms rather than picking one.
+**`--root` is required. Nothing is discovered.** No walk-up, no
+working-directory inference, no marker sniffing, no fallback guess — inferring
+a root wrongly is silent, and every search afterwards returns plausible
+results from a tree you did not ask about.
 
 ## Register with an MCP client
 
@@ -84,317 +86,107 @@ Add to `.mcp.json` in your project, with an **absolute path**:
     "forge-search": {
       "type": "stdio",
       "command": "forge-search",
-      "args": ["serve", "--root", "/absolute/path/to/project"]
+      "args": ["serve", "--root", "/absolute/path/to/project", "--semantic"]
     }
   }
 }
 ```
 
-`${workspaceFolder}` also works, but only as a fallback — see below.
-
-It is a VS Code `launch.json` variable, and MCP clients do not agree on it:
-
-| Client | `${workspaceFolder}` |
-|---|---|
-| Claude Code (`.mcp.json`) | **Not supported.** Only environment-variable expansion — `${VAR}` and `${VAR:-default}` — so it is passed through as a literal string. |
-| VS Code (`.vscode/mcp.json`) | Documented as supported, but [several](https://github.com/microsoft/vscode/issues/251263) [open](https://github.com/microsoft/vscode/issues/245905) [bugs](https://github.com/microsoft/vscode/issues/297794) report it resolving to the literal string. |
-
-Because it arrives as a literal string either way, forge-search treats
-`${workspaceFolder}` (and `${workspaceFolder}/sub`) as **the working
-directory**. For a stdio MCP server that is the project root in practice —
-verified against a live Claude Code server — but Claude Code's docs explicitly
-tell servers not to depend on cwd and do not guarantee it.
-
-So it is a fallback, not a recommendation. To see what it resolved to, the
-server reports its roots and active adapter on **two** channels, because
-clients differ in which they surface:
-
-**stderr, at startup** (default; `--quiet` disables):
-
-```text
-[warning] [server stderr] forge-search: roots: apexyard=/Users/you/code/apexyard  adapter: apexyard
-```
-
-The `[warning]` is not a real severity and not something a server can change.
-VS Code pipes every stderr line at a hardcoded `LogLevel.Warning` with no
-content parsing — see [`extHostMcpNode.ts`][ehmn], which notes that stderr
-handling is [unspecified by MCP][spec177]. Any server writing anything to
-stderr looks like it is warning you.
-
-**`notifications/message` at level `info`**, on the first tool call of a
-session:
-
-```text
-[info] Active configuration — roots: apexyard=/Users/you/code/apexyard  adapter: apexyard
-```
-
-This is the protocol's real logging channel, and it carries a level, so it
-renders as information. Three details decide whether you see it:
-
-| Requirement | Why |
-|---|---|
-| The server declares `logging: {}` | Without it VS Code never sends `logging/setLevel`, so no level is negotiated. forge-search declares it. |
-| A tool call has happened | There is no session to send on until a request arrives, so it cannot be emitted at startup. Run one search. |
-| The output channel's level allows `info` | VS Code forwards the channel's level to the server ([#256180][vsc], VS Code 1.103+). At `Warning` the server correctly suppresses `info`. Raise it with the gear icon in the Output pane. |
-
-VS Code's MCP logging support is implemented but **undocumented** — the
-[extension guide][guide] does not list it among supported capabilities. Hence
-both channels: stderr is guaranteed, the notification is cleaner.
-
-[ehmn]: https://github.com/microsoft/vscode/blob/main/src/vs/workbench/api/node/extHostMcpNode.ts
-[spec177]: https://github.com/modelcontextprotocol/specification/issues/177
-[vsc]: https://github.com/microsoft/vscode/issues/256180
-[guide]: https://code.visualstudio.com/api/extension-guides/ai/mcp
-
-If cwd is not what you expected, the wrong tree is indexed and every search
-afterwards returns plausible results from the wrong place. An absolute path
-cannot go wrong this way.
-
-Any *other* unexpanded variable is still an error, not a second fallback.
-
-The honest cost of an absolute path is that `.mcp.json` becomes per-machine.
-If the file is shared, `.gitignore` it or template it. Claude Code does set
-`CLAUDE_PROJECT_DIR` in the spawned server's environment — but it is not
-available at config-parse time, so it cannot be used in `args`.
-
-Several roots are fine — repeat `--root`, optionally labelling each:
-
-```json
-"args": ["serve",
-         "--root", "api=/abs/path/api",
-         "--root", "web=/abs/path/web"]
-```
-
-Tools then appear as `mcp__forge-search__search_code`, `…__search_docs`, and
+Tools appear as `mcp__forge-search__search_code`, `…__search_docs`, and
 `…__reindex`.
 
-The server name is configurable (`--name`). It defaults to `forge-search` and
-should stay that way unless you have a specific reason: registering under
-another product's name collides with it wherever both are installed.
+Avoid `${workspaceFolder}` — it is a VS Code `launch.json` variable that MCP
+clients do not agree on. It is accepted as a fallback, but see
+[docs/troubleshooting.md](docs/troubleshooting.md#workspacefolder-appears-literally-in-an-error).
 
-## Portfolio adapters
+## How it searches
 
-Some projects are really *several* projects — a parent repo with managed
-project clones underneath it. Search finds those files either way, since the
-subdirectories are traversed like any others. What an adapter adds is
-**per-project labels**, which is what makes `project="name"` filtering work
-and keeps result paths relative to each project rather than to the parent.
+Two arms answer different questions, fused by rank.
 
-```bash
-forge-search serve --root ws=/absolute/path/to/portfolio --adapter apexyard
-# → apexyard expanded ws into 4
+```mermaid
+flowchart LR
+    q["Query"] --> lex["Lexical<br/>SQLite FTS5<br/><i>exact tokens, filenames</i>"]
+    q --> sem["Semantic<br/>sqlite-vec + ONNX<br/><i>concepts, paraphrase</i>"]
+    lex --> f["Reciprocal<br/>Rank Fusion"]
+    sem --> f
+    f --> out["Ranked hits"]
 ```
 
-**Adapters are named, never detected.** An adapter that enables itself because
-it spotted a marker file can fire when you did not want it and stay quiet when
-you did — both invisibly. Naming it costs one flag and removes the failure
-class. Any expansion is reported, because turning one root into several is
-more than you literally asked for.
+Measured on a 26-query fixture, mostly conceptual, over a real repository:
 
-An adapter that finds nothing to expand keeps the root unchanged, so naming
-one can never make a search cover *less* than requested.
-
-## Transport
-
-`stdio` (default) spawns the server per session — the client owns its
-lifecycle, there is no port, and a crash is a non-zero exit rather than a hung
-socket.
-
-`--transport streamable-http` runs one long-lived server for many sessions.
-Worth it once the semantic arm is enabled, since the embedding model then loads
-once instead of per session.
-
-```bash
-forge-search serve --transport streamable-http --root api=~/code/api
+```text
+mode         recall      p50 ms
+lexical      11.5%        0.5
+semantic     61.5%        4.9
+hybrid       61.5%        6.1
 ```
 
-Both are provided by the MCP SDK directly; no web framework is involved.
+Hybrid is the default: it never loses the exact identifier matches BM25 gets
+for free. The semantic arm needs `--semantic` plus a one-time
+`forge-search warm` — without it you are on lexical only, and conceptual
+queries return nothing at all.
+
+Details: [docs/searching.md](docs/searching.md).
 
 ## Tools
 
-### `search_code(query, project=None, top_k=10)`
+| Tool | Purpose |
+|---|---|
+| `search_code(query, project=None, top_k=10)` | Full-text across contents **and** filenames |
+| `search_docs(query, project=None, top_k=10)` | The same, restricted to `.md` / `.rst` / `.txt` |
+| `reindex(project=None, force=False)` | Rarely needed — searches detect staleness themselves |
 
-Full-text search across all roots, or one named root. Searches **both file
-contents and filenames** — a filename match ranks above incidental content
-mentions, because someone searching `auth.py` wants that file rather than the
-tests referencing it. This matters more than it sounds: a file frequently does
-not contain its own name, so a content-only index cannot find it at all.
+Queries are matched **literally**: hyphens, dots, and slashes in identifiers
+and paths are searched as written, not parsed as operators. Prefix with
+`fts5:` for expression syntax (`NEAR`, `OR`, prefix matching).
 
-Queries are matched **literally** — hyphens, dots, slashes, and parentheses in
-identifiers and paths are searched as written, not parsed as operators. Prefix
-with `fts5:` for full-text expression syntax (`NEAR`, `OR`, prefix matching).
-
-Returns:
-
-```json
-{
-  "results": [
-    {"project": "api", "path": "src/auth.py", "line": 42,
-     "excerpt": "def validate_token(token):", "score": 9.5}
-  ],
-  "truncated": false,
-  "degraded": null,
-  "reindexed": null
-}
-```
-
-`degraded` lists roots that could not be read — reported rather than dropped,
-so a partial answer never looks complete. `reindexed` names roots refreshed
-during the call.
-
-### `search_docs(query, project=None, top_k=10)`
-
-The same, restricted to prose (`.md`, `.rst`, `.txt`).
-
-### `reindex(project=None, force=False)`
-
-Rarely needed: searches detect staleness and reindex automatically. Use
-`force` after changing traversal settings.
-
-## Freshness
-
-Every search compares the index against the filesystem — file sizes and mtimes
-— and reindexes if they disagree. One `stat` per indexed file, cheap enough to
-run on every query.
-
-This is deliberate. Delegating it, by reminding a human or an agent to reindex
-after edits, is a convention — and conventions nobody follows are what produced
-every defect above. A stale index has the same shape: plausible results, no
-error, nothing that announces the problem.
-
-## Is the semantic arm worth it?
-
-`bench` answers that with a number rather than an opinion, and is written so
-the unflattering answer is as easy to reach as the flattering one:
-
-```bash
-forge-search bench --semantic \
-  --query "validate_token::src/auth.py" \
-  --query "how sessions expire::docs/sessions.md"
-```
-
-```text
-mode         recall      chars    p50 ms    p95 ms
-lexical      25.0%        717       1.4       7.5
-semantic     87.5%      2,651       4.8       6.9
-hybrid       87.5%      2,774       6.0       8.0
-
-Verdict:
-  Hybrid improves answer-recall by 62.5% over lexical alone. The semantic
-  arm earns its cost here.
-```
-
-Each query names the file that *should* be found. That is not optional:
-token counts are trivially improved by returning less, so a mode that halves
-its output by dropping the answer has not won. Every comparison is at **equal
-answer-recall**.
-
-**It has been run on a real corpus.** The semantic arm finds **87.5%** where
-lexical alone finds 25% — but it took two bug fixes to get there, and the first
-run reported 0%. See [BENCHMARK.md](BENCHMARK.md) for the full progression, two
-well-supported priors that lost to local measurement, and the limits of an
-8-query fixture.
-
-**Cross-encoder reranking** is implemented (`--rerank`, after
-`forge-search warm --reranker`) and **off by default because it lost** — the
-largest reported single-stage gain in the literature was neutral on both arms
-here and cost hybrid 7.7 points at 10× the latency. Two priors before it lost
-the same way. Try it on your corpus; the flag is there precisely because these
-results are corpus-specific.
-
-`verdict()` will say *"pure overhead — remove the arm"* and *"hybrid is WORSE
-than lexical"* as readily as the opposite. If it says the semantic arm earns
-nothing on your corpus, set `ArmWeights(semantic=0.0)` — no release needed —
-and if that holds, delete the arm rather than carrying it.
+Responses carry `degraded` (roots that could not be read — reported, never
+dropped, so a partial answer never looks complete) and `reindexed` (roots
+refreshed during the call).
 
 ## Indexes
 
-One SQLite file per root, in **`<project>/.forge_search/`** by default.
+One SQLite file per root, in `<root>/.forge_search/`, beside the code so it
+lives and dies with the project. The directory ships a `.gitignore` containing
+`*`, so it ignores itself — nothing to remember, invisible to `git status`.
 
-```text
-your-project/
-  .forge_search/
-    your-project.db
-    .gitignore        ← contains "*", so the directory ignores itself
-```
+Every search stats each indexed file and reindexes on mismatch. Delegating
+that to a human is a convention, and conventions nobody follows produced every
+defect above.
 
-The index lives and dies with the project. Delete the project and its index
-goes with it; nothing accumulates anywhere else.
+An absolute `--index-dir` opts back into a single shared directory for trees
+you cannot write to. Details: [docs/indexing.md](docs/indexing.md).
 
-This reverses an earlier default, and the reasoning is worth stating because
-the original argument was not wrong. A shared OS cache directory keeps
-forge-search from writing into repositories it does not own — but it keys each
-index by a hash of the root path, so deleting, moving, or renaming a project
-orphans its index forever, with nothing in the filename to identify it.
-Nothing collects them and nothing announces the leak. The machine this was
-written on had ~600 MB of orphans before anyone looked.
+## Documentation
 
-The two real objections to in-tree storage are answered rather than accepted:
-
-| Objection | Answer |
+| Document | What's in it |
 |---|---|
-| It gets committed | The directory ships a `.gitignore` containing `*`, so it ignores itself and its contents. Nothing to remember, invisible to `git status`. |
-| It indexes itself | `.forge_search` is excluded by traversal, so a search can never match the index's own bytes. |
+| [docs/architecture.md](docs/architecture.md) | How the pieces fit, the module map, the adapter seam |
+| [docs/indexing.md](docs/indexing.md) | Traversal, schema, freshness, chunking, staleness guards |
+| [docs/searching.md](docs/searching.md) | The two arms, fusion, reranking, query syntax, the tools |
+| [docs/configuration.md](docs/configuration.md) | Every flag, index location, adapters, transports |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | Real failures and what caused them |
+| [docs/decisions.md](docs/decisions.md) | Why it is shaped this way, including reversals |
+| [BENCHMARK.md](BENCHMARK.md) | Numbers, method, and honest limits |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev workflow and the silent-failure checklist |
 
-**Somewhere else instead** — an absolute `--index-dir` opts back into a single
-shared directory, which is still right for trees you cannot write to:
+## Is the semantic arm worth it?
 
-```bash
-forge-search serve --root /abs/path --index-dir ~/.cache/forge-search
-```
-
-There the path hash comes back, since one directory holding many roots cannot
-tell two projects that share a label apart. A *relative* `--index-dir` is
-resolved per root, so each root gets its own.
-
-An adapter can move the default too — a portfolio of many project clones may
-want one directory rather than one per clone. Precedence is
-`--index-dir` > adapter > `.forge_search`; an adapter only changes the
-default, never something you stated.
-
-Indexes are safe to delete at any time; the next search rebuilds.
-
-## Known limitation
-
-The lexical index is token-based. A long unbroken run of characters — minified
-JavaScript, a base64 blob — is a single token, so searching for a substring
-inside it finds nothing. This is correct behaviour for the workload it targets
-(identifiers, filenames, short phrases) and is pinned by a test so it stays
-deliberate. Substring search over such content would need a trigram index.
-
-## Architecture
-
-```text
-core/       generic. No knowledge of any integration.
-  roots      explicit roots + the RootProvider seam; nothing discovered
-  traversal  the four defects, fixed as defaults
-  cache      per-root index paths (shared cache dir or in-tree), no absolute
-             path ever persisted
-  index      FTS5 content + filename matching, incremental, schema-versioned
-  query      query escaping; errors kept distinct from empty results
-  embedding  the Embedder protocol; hashing (no download) and ONNX
-  semantic   chunking + sqlite-vec, importable only when installed
-  fusion     RRF; degrades to exactly the lexical order when an arm is empty
-  hybrid     composes both arms so neither imports the other
-  rerank     optional cross-encoder final stage; off by default (it lost)
-  bench      the measurement that judges every optional stage
-  model      explicit model fetch; separate so embedding never imports network
-  server     the MCP tool surface
-adapters/   integration-specific root expanders, named with --adapter, never detected
-```
-
-Integrations supply roots through `RootProvider` and nothing else. The seam is
-narrow on purpose: anything wider lets integration concepts into the core, at
-which point "works standalone" is a claim in a README rather than a property of
-the code.
-
-## Development
+`bench` answers with a number rather than an opinion, and is written so the
+unflattering answer is as easy to reach as the flattering one:
 
 ```bash
-uv sync
-uv run pytest                    # 185 tests, lexical-only
-uv run --extra semantic pytest   # same suite with the semantic arm
+forge-search bench --root /abs/path --fixture bench/apexyard.txt --semantic
 ```
+
+Every fixture line names the file that *should* be found, so modes are
+compared at **equal answer-recall**. Without that control a mode "wins" on
+tokens by returning less — which is losing, more cheaply.
+
+`verdict()` will say *"pure overhead — remove the arm"* as readily as the
+opposite; five tests exist solely to keep it willing to. If it says the
+semantic arm earns nothing on your corpus, set `ArmWeights(semantic=0.0)` — no
+release needed — and if that holds, delete the arm rather than carrying it.
 
 ## Licence
 
