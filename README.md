@@ -105,24 +105,46 @@ directory**. For a stdio MCP server that is the project root in practice —
 verified against a live Claude Code server — but Claude Code's docs explicitly
 tell servers not to depend on cwd and do not guarantee it.
 
-So it is a fallback, not a recommendation. Check what it resolved to — on the
-first tool call of a session, the server logs its roots and active adapter
-once:
+So it is a fallback, not a recommendation. To see what it resolved to, the
+server reports its roots and active adapter on **two** channels, because
+clients differ in which they surface:
+
+**stderr, at startup** (default; `--quiet` disables):
 
 ```text
-Active configuration — roots: apexyard=/Users/you/code/apexyard  adapter: apexyard
+[warning] [server stderr] forge-search: roots: apexyard=/Users/you/code/apexyard  adapter: apexyard
 ```
 
-That goes out as an MCP `notifications/message` at level `info`, **not** on
-stderr. A stdio server's stderr is the only other channel it has, and MCP
-clients render every stderr line as `[warning]` — so a healthy launch would
-print a warning every single time, which trains you to ignore the log and
-then miss a real one. `notifications/message` carries a level, so information
-arrives as information.
+The `[warning]` is not a real severity and not something a server can change.
+VS Code pipes every stderr line at a hardcoded `LogLevel.Warning` with no
+content parsing — see [`extHostMcpNode.ts`][ehmn], which notes that stderr
+handling is [unspecified by MCP][spec177]. Any server writing anything to
+stderr looks like it is warning you.
 
-It rides the first tool call because there is no session to send it on until
-a request arrives. Pass `--verbose` to get the line on stderr as well; every
-other subcommand is an ordinary CLI run and prints it there normally.
+**`notifications/message` at level `info`**, on the first tool call of a
+session:
+
+```text
+[info] Active configuration — roots: apexyard=/Users/you/code/apexyard  adapter: apexyard
+```
+
+This is the protocol's real logging channel, and it carries a level, so it
+renders as information. Three details decide whether you see it:
+
+| Requirement | Why |
+|---|---|
+| The server declares `logging: {}` | Without it VS Code never sends `logging/setLevel`, so no level is negotiated. forge-search declares it. |
+| A tool call has happened | There is no session to send on until a request arrives, so it cannot be emitted at startup. Run one search. |
+| The output channel's level allows `info` | VS Code forwards the channel's level to the server ([#256180][vsc], VS Code 1.103+). At `Warning` the server correctly suppresses `info`. Raise it with the gear icon in the Output pane. |
+
+VS Code's MCP logging support is implemented but **undocumented** — the
+[extension guide][guide] does not list it among supported capabilities. Hence
+both channels: stderr is guaranteed, the notification is cleaner.
+
+[ehmn]: https://github.com/microsoft/vscode/blob/main/src/vs/workbench/api/node/extHostMcpNode.ts
+[spec177]: https://github.com/modelcontextprotocol/specification/issues/177
+[vsc]: https://github.com/microsoft/vscode/issues/256180
+[guide]: https://code.visualstudio.com/api/extension-guides/ai/mcp
 
 If cwd is not what you expected, the wrong tree is indexed and every search
 afterwards returns plausible results from the wrong place. An absolute path

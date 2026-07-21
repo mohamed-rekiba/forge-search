@@ -186,7 +186,6 @@ class ForgeSearch:
                 "identifiers and paths are searched as written, not parsed as "
                 "operators. Prefix a query with 'fts5:' for full-text "
                 "expression syntax."
-                + (f"\n\nActive configuration — {self.summary}" if self.summary else "")
             ),
         )
 

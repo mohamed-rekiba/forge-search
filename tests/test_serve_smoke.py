@@ -188,22 +188,6 @@ def test_config_is_announced_as_info_not_a_stderr_warning(project):
     assert "forge-search: roots:" in err
 
 
-def test_instructions_name_the_roots_and_adapter(project):
-    # Where the summary went. Client-visible metadata, not a warning.
-    client = Client(
-        "--root", str(project), "--adapter", "apexyard", cwd=str(project)
-    )
-    try:
-        instructions = client.handshake()["result"]["instructions"]
-    finally:
-        client.close()
-
-    assert str(project) in instructions
-    # The adapter is named even though it expanded nothing: "which adapter is
-    # active" is a question the operator asked by passing the flag.
-    assert "adapter: apexyard" in instructions
-
-
 def test_logging_capability_is_advertised(project):
     # Without this, notifications/message may be dropped by a spec-compliant
     # client — which is what VS Code does. The notification was being sent
