@@ -49,6 +49,12 @@ uv tool install forge-search              # lexical search
 uv tool install 'forge-search[semantic]'  # + semantic (adds an embedding model)
 ```
 
+Latest from source:
+
+```bash
+uv tool install --upgrade --force "forge-search[semantic] @ git+https://github.com/mohamed-rekiba/forge-search"
+```
+
 Requires Python 3.14+. No compiler — both native dependencies ship prebuilt
 wheels for cp314.
 
