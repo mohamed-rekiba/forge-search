@@ -39,7 +39,7 @@ __all__ = ["main"]
 _LAST_RESOLUTION: Resolution | None = None
 
 #: The VS Code variable clients disagree about. Tolerated, never recommended.
-_VSCODE_WORKSPACE = "${workspaceFolder}"
+_CURRENT_WORKSPACE = ["${workspaceFolder}", "."]
 
 #: `${VAR}` or `$VAR` left in a path — a client that did not substitute it.
 _UNEXPANDED = re.compile(r"\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*")
@@ -90,18 +90,20 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
         label, _, path_str = raw.partition("=")
         if not path_str:
             path_str, label = label, ""
-        if path_str.startswith(_VSCODE_WORKSPACE):
-            # Compatibility shim for `--root ${workspaceFolder}`, which several
-            # MCP clients pass through unexpanded (see README's per-client
-            # table). Falls back to the working directory, which for a stdio
-            # MCP server is the project root in practice — verified against a
-            # live Claude Code server — but is NOT guaranteed by its docs.
-            #
-            # Accepted because the resolved root is always printed at startup,
-            # so a wrong cwd is visible rather than silent. Handles the
-            # `${workspaceFolder}/sub` form too, since matching only the bare
-            # string would leave that failing for a non-obvious reason.
-            path_str = str(Path.cwd()) + path_str[len(_VSCODE_WORKSPACE) :]
+        for _prefix in _CURRENT_WORKSPACE:
+            if path_str.startswith(_prefix):
+                # Compatibility shim for `--root ${workspaceFolder}`, which several
+                # MCP clients pass through unexpanded (see README's per-client
+                # table). Falls back to the working directory, which for a stdio
+                # MCP server is the project root in practice — verified against a
+                # live Claude Code server — but is NOT guaranteed by its docs.
+                #
+                # Accepted because the resolved root is always printed at startup,
+                # so a wrong cwd is visible rather than silent. Handles the
+                # `${workspaceFolder}/sub` form too, since matching only the bare
+                # string would leave that failing for a non-obvious reason.
+                path_str = str(Path.cwd()) + path_str[len(_prefix):]
+                break
         path = Path(path_str).expanduser().resolve()
         if not path.is_dir():
             # An unexpanded `${...}` is the most likely cause by far, and the
