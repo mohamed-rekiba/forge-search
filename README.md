@@ -105,19 +105,24 @@ directory**. For a stdio MCP server that is the project root in practice —
 verified against a live Claude Code server — but Claude Code's docs explicitly
 tell servers not to depend on cwd and do not guarantee it.
 
-So it is a fallback, not a recommendation. Check what it resolved to: the
-server reports its roots and active adapter in the MCP `instructions` it
-returns at initialization —
+So it is a fallback, not a recommendation. Check what it resolved to — on the
+first tool call of a session, the server logs its roots and active adapter
+once:
 
 ```text
 Active configuration — roots: apexyard=/Users/you/code/apexyard  adapter: apexyard
 ```
 
-— which `serve` deliberately does **not** print to stderr, because MCP clients
-render every stderr line as a `[warning]`, and a line printed on every launch
-is a permanent false warning that trains you to ignore the log. Pass
-`--verbose` if you want it on stderr anyway; every other subcommand prints it
-normally.
+That goes out as an MCP `notifications/message` at level `info`, **not** on
+stderr. A stdio server's stderr is the only other channel it has, and MCP
+clients render every stderr line as `[warning]` — so a healthy launch would
+print a warning every single time, which trains you to ignore the log and
+then miss a real one. `notifications/message` carries a level, so information
+arrives as information.
+
+It rides the first tool call because there is no session to send it on until
+a request arrives. Pass `--verbose` to get the line on stderr as well; every
+other subcommand is an ordinary CLI run and prints it there normally.
 
 If cwd is not what you expected, the wrong tree is indexed and every search
 afterwards returns plausible results from the wrong place. An absolute path

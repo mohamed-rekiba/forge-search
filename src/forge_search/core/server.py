@@ -33,7 +33,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from .embedding import Embedder
 from .fusion import ArmWeights
@@ -81,6 +81,7 @@ class ForgeSearch:
     #: render it as a warning on every launch.
     summary: str | None = None
     _indexes: dict[str, HybridIndex] = field(default_factory=dict, init=False)
+    _announced: bool = field(default=False, init=False)
 
     # -- index lifecycle ---------------------------------------------------
 
@@ -197,7 +198,8 @@ class ForgeSearch:
                 "finding identifiers, call sites, filenames, and precedents."
             ),
         )
-        def search_code(
+        async def search_code(
+            ctx: Context,
             query: str,
             project: str | None = None,
             top_k: int = 10,
@@ -210,6 +212,7 @@ class ForgeSearch:
                 project: Restrict to one root by label. Omit to search all.
                 top_k: Maximum results (capped at 50).
             """
+            await self._announce(ctx)
             return self._search(query, project=project, top_k=top_k, doc_only=False)
 
         @mcp.tool(
@@ -221,7 +224,8 @@ class ForgeSearch:
                 "rather than implementation."
             ),
         )
-        def search_docs(
+        async def search_docs(
+            ctx: Context,
             query: str,
             project: str | None = None,
             top_k: int = 10,
@@ -233,6 +237,7 @@ class ForgeSearch:
                 project: Restrict to one root by label. Omit to search all.
                 top_k: Maximum results (capped at 50).
             """
+            await self._announce(ctx)
             return self._search(query, project=project, top_k=top_k, doc_only=True)
 
         @mcp.tool(
@@ -244,13 +249,16 @@ class ForgeSearch:
                 "`force` after changing traversal settings."
             ),
         )
-        def reindex(project: str | None = None, force: bool = False) -> dict[str, Any]:
+        async def reindex(
+            ctx: Context, project: str | None = None, force: bool = False
+        ) -> dict[str, Any]:
             """Reindex one or all roots.
 
             Args:
                 project: Restrict to one root by label. Omit for all.
                 force: Rebuild from scratch rather than incrementally.
             """
+            await self._announce(ctx)
             selected = [r for r in self.roots if project is None or r.label == project]
             if project is not None and not selected:
                 known = ", ".join(r.label for r in self.roots) or "(none)"
@@ -268,6 +276,27 @@ class ForgeSearch:
             return {"roots": report}
 
         return mcp
+
+    async def _announce(self, ctx: Context) -> None:
+        """Report the active configuration once per session, as `info`.
+
+        The only other channel a stdio server has is stderr, and MCP clients
+        render every stderr line as `[warning]` — a healthy server should not
+        print a warning on every launch. `notifications/message` is the
+        protocol's actual logging channel and carries a level, so this arrives
+        as information.
+
+        It cannot be sent at startup: there is no session to send it on until
+        a request arrives. So it rides the first tool call, once.
+        """
+        if self._announced or not self.summary:
+            return
+        self._announced = True
+        try:
+            await ctx.info(f"Active configuration — {self.summary}")
+        except Exception:  # pragma: no cover - a client may not accept logs
+            # Never let a log notification break a search.
+            pass
 
     def run(self, transport: str = "stdio") -> None:
         """Serve. See the module docstring on transport choice."""

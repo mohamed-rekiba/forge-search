@@ -38,6 +38,7 @@ class Client:
             bufsize=1,
             cwd=cwd,
         )
+        self.notifications: list[dict] = []
 
     def send(self, message: dict) -> None:
         assert self.proc.stdin is not None
@@ -45,12 +46,24 @@ class Client:
         self.proc.stdin.flush()
 
     def read(self) -> dict:
-        assert self.proc.stdout is not None
-        line = self.proc.stdout.readline()
-        if not line:
-            assert self.proc.stderr is not None
-            raise AssertionError(f"server died. stderr:\n{self.proc.stderr.read()}")
-        return json.loads(line)
+        """Next response, collecting any notifications that arrive first.
+
+        A real client demultiplexes by `id`; notifications have none. Reading
+        blindly makes a log notification look like a malformed response.
+        """
+        while True:
+            assert self.proc.stdout is not None
+            line = self.proc.stdout.readline()
+            if not line:
+                assert self.proc.stderr is not None
+                raise AssertionError(
+                    f"server died. stderr:\n{self.proc.stderr.read()}"
+                )
+            message = json.loads(line)
+            if "id" not in message:
+                self.notifications.append(message)
+                continue
+            return message
 
     def handshake(self) -> dict:
         self.send(
@@ -149,6 +162,27 @@ def test_verbose_restores_the_stderr_line(project):
     finally:
         err = client.close()
     assert "forge-search: roots:" in err
+
+
+def test_config_is_announced_as_info_not_a_stderr_warning(project):
+    # Where the startup line went. stderr would arrive as `[warning]` in the
+    # client log, so a healthy launch would always look like a problem;
+    # notifications/message carries a level, so this arrives as information.
+    client = Client("--root", str(project), "--adapter", "apexyard", cwd=str(project))
+    try:
+        client.handshake()
+        client.call("search_code", query="tokens", top_k=5)
+        client.call("search_code", query="tokens", top_k=5)
+    finally:
+        err = client.close()
+
+    logs = [n for n in client.notifications if n.get("method") == "notifications/message"]
+    assert len(logs) == 1, f"expected exactly one announcement, got {len(logs)}"
+    assert logs[0]["params"]["level"] == "info"
+    text = logs[0]["params"]["data"]
+    assert str(project) in text
+    assert "adapter: apexyard" in text
+    assert err.strip() == ""
 
 
 def test_instructions_name_the_roots_and_adapter(project):
