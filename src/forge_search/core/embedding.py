@@ -44,6 +44,19 @@ class Embedder(Protocol):
     @property
     def dim(self) -> int: ...
 
+    @property
+    def fingerprint(self) -> str:
+        """Identifies which model produced a vector.
+
+        `dim` alone cannot: `all-MiniLM-L6-v2` and `multi-qa-MiniLM-L6-cos-v1`
+        are both 384-dimensional and produce completely different, mutually
+        meaningless embeddings. Without an identity stamped into the index,
+        switching models silently reuses the old model's vectors — cosine
+        distances computed across two embedding spaces, returning confident
+        nonsense with nothing to indicate a problem.
+        """
+        ...
+
     def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
@@ -78,6 +91,10 @@ class HashingEmbedder:
     @property
     def dim(self) -> int:
         return self._dim
+
+    @property
+    def fingerprint(self) -> str:
+        return f"hashing/{self._dim}"
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return [self._embed_one(t) for t in texts]
@@ -161,6 +178,16 @@ class OnnxEmbedder:
     @property
     def dim(self) -> int:
         return self._dim
+
+    @property
+    def fingerprint(self) -> str:
+        """Model directory name plus the prefixes that shaped the vectors.
+
+        The prefixes are part of the identity, not decoration: the same model
+        with and without `passage: ` produces different embeddings, so an
+        index built one way must not be reused the other.
+        """
+        return f"{self.model_dir.name}/{self._dim}/{self.query_prefix}|{self.doc_prefix}"
 
     def embed(self, texts: list[str], *, is_query: bool = False) -> list[list[float]]:
         if not texts:

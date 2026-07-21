@@ -18,6 +18,26 @@ semantic     87.5%      2,651       4.8       6.9
 hybrid       87.5%      2,774       6.0       8.0
 ```
 
+On the harder 26-query fixture (`bench/apexyard.txt`), against a **clean**
+index:
+
+```text
+lexical      11.5%      1,540       0.5       2.8
+semantic     61.5%     10,533       4.9       5.2
+hybrid       61.5%     11,335       6.1       6.6
+```
+
+"Clean" is load-bearing. The same fixture against an index accumulated across
+several experiment variants reported **50.0% / 57.7%** — 11.5 and 3.8 points
+low. Nothing recorded which model or chunking had produced the stored vectors,
+so switching `--model` or toggling structural chunking silently kept the old
+ones. Every reranking measurement below was taken on that index and is
+correspondingly understated; the conclusion (reranking did not help here) is
+unchanged, but the absolute numbers are not trustworthy.
+
+That gap is now closed: the semantic index records a model + chunking
+fingerprint and discards itself when either changes.
+
 ## How it got there — and what moved the needle
 
 Every row below is the same corpus, same model, same eight queries. **Only the

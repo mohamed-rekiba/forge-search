@@ -382,6 +382,15 @@ def vec_available() -> bool:
         conn.close()
 
 
+def _chunking_id() -> str:
+    """Identifies the chunking strategy that produced the stored vectors.
+
+    Chunking changes what text was embedded, so it invalidates an index just
+    as surely as changing the model does.
+    """
+    return "structural" if USE_STRUCTURAL_CHUNKING else "lines"
+
+
 class SemanticIndex:
     """Vector index over one root, stored beside the lexical index."""
 
@@ -408,6 +417,10 @@ class SemanticIndex:
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS vector_meta_relpath ON vector_meta(relpath)"
         )
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS vector_config (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        self._discard_if_built_differently()
         self._conn.commit()
 
     def close(self) -> None:
@@ -418,6 +431,42 @@ class SemanticIndex:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+    def _discard_if_built_differently(self) -> None:
+        """Drop every vector if a different model or chunking produced them.
+
+        Embeddings are only comparable to other embeddings from the same model
+        and the same chunking. Reusing them across a change is not a degraded
+        result — it is cosine distance between two unrelated vector spaces,
+        which returns confident nonsense with nothing to signal a problem.
+
+        Nothing recorded this until now, so switching `--model`, or toggling
+        structural chunking, silently kept the old vectors. It cost real
+        measurements: a benchmark run against an index accumulated across
+        several experiment variants reported semantic recall 11.5 points lower
+        than the same corpus rebuilt clean.
+
+        Blunt on purpose, like the lexical schema guard: drop everything and
+        let the next reindex rebuild, rather than attempting to reconcile.
+        """
+        current = f"{self.embedder.fingerprint}|chunking={_chunking_id()}"
+        row = self._conn.execute(
+            "SELECT value FROM vector_config WHERE key = 'build'"
+        ).fetchone()
+        if row and row[0] == current:
+            return
+
+        with self._conn:
+            # Unconditional when it differs, INCLUDING when nothing is stored:
+            # an unstamped index predates this guard and is exactly the case
+            # that needs rebuilding. Clearing an empty index is free; skipping
+            # a needed rebuild is silent and permanent.
+            self._conn.execute("DELETE FROM vectors")
+            self._conn.execute("DELETE FROM vector_meta")
+            self._conn.execute(
+                "INSERT OR REPLACE INTO vector_config (key, value) VALUES ('build', ?)",
+                (current,),
+            )
 
     def drop_file(self, relpath: str) -> None:
         rows = self._conn.execute(

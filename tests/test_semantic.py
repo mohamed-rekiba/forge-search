@@ -397,3 +397,42 @@ class TestChunkerDefault:
         code = "def alpha():\n    pass\n\n\ndef beta():\n    pass\n"
         chunks = list(structural_chunks(code, relpath="m.py"))
         assert chunks
+
+
+def test_switching_models_discards_the_old_vectors(tmp_path):
+    """Vectors from a different model are not degraded — they are meaningless.
+
+    all-MiniLM and multi-qa-MiniLM are both 384-dimensional, so `dim` cannot
+    tell them apart. Reusing one model's vectors under another computes cosine
+    distance across two unrelated embedding spaces and returns confident
+    nonsense with nothing to signal a problem.
+    """
+    pytest.importorskip("sqlite_vec")
+    db = tmp_path / "i.db"
+
+    first = HashingEmbedder(dim=8)
+    with SemanticIndex(db, first) as index:
+        index.index_file("a.md", "hello world\n")
+        index.commit()
+        assert index.count() > 0
+
+    # Same dimension, different model identity.
+    class Other(HashingEmbedder):
+        @property
+        def fingerprint(self) -> str:
+            return "other-model/8"
+
+    with SemanticIndex(db, Other(dim=8)) as index:
+        assert index.count() == 0, "stale vectors from another model survived"
+
+
+def test_same_model_keeps_its_vectors(tmp_path):
+    # The guard must not throw away work on every open.
+    pytest.importorskip("sqlite_vec")
+    db = tmp_path / "i.db"
+    with SemanticIndex(db, HashingEmbedder(dim=8)) as index:
+        index.index_file("a.md", "hello world\n")
+        index.commit()
+        before = index.count()
+    with SemanticIndex(db, HashingEmbedder(dim=8)) as index:
+        assert index.count() == before
