@@ -62,16 +62,14 @@ def _providers() -> list[RootProvider]:
     return found
 
 
-def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
-    """Roots are always explicit — there is no discovery.
+def _explicit_roots(args: argparse.Namespace) -> list[Root]:
+    """The roots the caller named, before any adapter expansion.
 
-    An absolute path, or `${workspaceFolder}` — which several MCP clients pass
-    through unexpanded, so it is accepted as a shorthand for the working
-    directory rather than failing. See README.md for the per-client table and
-    why cwd is a fallback rather than the recommendation.
-
-    Guessing was removed because the caller already knows the answer, and
-    guessing wrongly is silent.
+    Parsing lives here, apart from `_resolve_roots`, so it can be re-run: the
+    `serve` command hands a closure over this to the server, which calls it to
+    re-resolve roots when a project registered after startup is first named
+    (see ForgeSearch.root_resolver). The caller's `--root` set does not change,
+    but the adapter re-reads its registry each time, so a new clone appears.
     """
     if not args.root:
         raise SystemExit(
@@ -102,7 +100,7 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
                 # so a wrong cwd is visible rather than silent. Handles the
                 # `${workspaceFolder}/sub` form too, since matching only the bare
                 # string would leave that failing for a non-obvious reason.
-                path_str = str(Path.cwd()) + path_str[len(_prefix):]
+                path_str = str(Path.cwd()) + path_str[len(_prefix) :]
                 break
         path = Path(path_str).expanduser().resolve()
         if not path.is_dir():
@@ -122,9 +120,22 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
                 )
             raise SystemExit(f"not a directory: {path}")
         explicit.append(Root(label=label or path.name, path=path))
+    return explicit
 
+
+def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
+    """Roots are always explicit — there is no discovery.
+
+    An absolute path, or `${workspaceFolder}` — which several MCP clients pass
+    through unexpanded, so it is accepted as a shorthand for the working
+    directory rather than failing. See README.md for the per-client table and
+    why cwd is a fallback rather than the recommendation.
+
+    Guessing was removed because the caller already knows the answer, and
+    guessing wrongly is silent.
+    """
     resolution = resolve_roots(
-        explicit,
+        _explicit_roots(args),
         adapters=_providers(),
         adapter_name=getattr(args, "adapter", None),
     )
@@ -287,6 +298,23 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     args.quiet_roots = getattr(args, "quiet", False)
     roots = _resolve_roots(args)
     resolution = _LAST_RESOLUTION
+
+    # Re-resolve on demand so a project registered after the server started is
+    # found without a restart. The adapter re-reads its registry on each
+    # expand(), so re-running resolution with the same `--root` picks up new
+    # clones. Kept quiet — this fires mid-session, and its stderr would be
+    # rendered as a spurious `[warning]` by the client on every discovery.
+    adapter_name = getattr(args, "adapter", None)
+
+    def _reresolve() -> list[Root]:
+        return list(
+            resolve_roots(
+                _explicit_roots(args),
+                adapters=_providers(),
+                adapter_name=adapter_name,
+            ).roots
+        )
+
     search = ForgeSearch(
         roots=roots,
         server_name=args.name,
@@ -294,6 +322,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         reranker=_reranker(args),
         index_dir=_index_dir(args),
         summary=resolution.describe() if resolution else None,
+        root_resolver=_reresolve,
     )
     try:
         search.run(transport=args.transport)

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -80,6 +80,13 @@ class ForgeSearch:
     #: server instructions rather than on stderr, where an MCP client would
     #: render it as a warning on every launch.
     summary: str | None = None
+    #: Re-runs root resolution on demand. Present, an unknown project name
+    #: triggers one re-resolution before it is allowed to fail — so a project
+    #: registered *after* the server started (a new portfolio clone, say) is
+    #: found without a restart. Absent (the default), the root set is fixed for
+    #: the process, which is correct for a standalone server given an explicit
+    #: `--root`. See `_resolve_selection`.
+    root_resolver: Callable[[], Sequence[Root]] | None = None
     _indexes: dict[str, HybridIndex] = field(default_factory=dict, init=False)
     _announced: bool = field(default=False, init=False)
     _min_log_level: str = field(default="info", init=False)
@@ -105,6 +112,47 @@ class ForgeSearch:
             index.close()
         self._indexes.clear()
 
+    # -- root selection ----------------------------------------------------
+
+    def _resolve_selection(self, project: str | None) -> list[Root]:
+        """The roots a request targets — all of them, or the one named.
+
+        A portfolio's project set is not fixed for the life of the server: a
+        clone can be registered after startup. Treating "unknown project" as a
+        permanent error would push the caller to restart the server — the same
+        "rely on a human to remember" convention that freshness-on-read exists
+        to remove. So a name that is not yet known triggers one re-resolution
+        of the root set before it is allowed to fail. If the project genuinely
+        does not exist, the error still fires, still names the known roots.
+
+        A freshly discovered root persists in `self.roots`, so an unnamed
+        (search-all) request that follows will include it too — the first
+        reference by name is what makes it visible, not a restart.
+        """
+        selected = [r for r in self.roots if project is None or r.label == project]
+        if project is not None and not selected and self.root_resolver is not None:
+            self._refresh_roots()
+            selected = [r for r in self.roots if r.label == project]
+        if project is not None and not selected:
+            known = ", ".join(r.label for r in self.roots) or "(none)"
+            # A wrong project name must be loud. Silently searching everything
+            # would answer a question the caller did not ask.
+            raise ValueError(f"unknown project {project!r}; known roots: {known}")
+        return selected
+
+    def _refresh_roots(self) -> None:
+        """Re-run root resolution to pick up projects added since startup.
+
+        Indexes are cached by label, so roots already known keep their open
+        handles and nothing is rebuilt — only newly-appeared labels cost
+        anything. A resolver returning fewer roots than before does not drop
+        cached indexes; they simply stop being selectable, and `close()` still
+        reaches them.
+        """
+        if self.root_resolver is None:
+            return
+        self.roots = list(self.root_resolver())
+
     def _ensure_fresh(self, index: HybridIndex) -> bool:
         """Reindex if the index disagrees with disk. Returns True if it did."""
         if index.is_stale():
@@ -124,12 +172,7 @@ class ForgeSearch:
     ) -> dict[str, Any]:
         top_k = max(1, min(top_k, MAX_TOP_K))
 
-        selected = [r for r in self.roots if project is None or r.label == project]
-        if project is not None and not selected:
-            known = ", ".join(r.label for r in self.roots) or "(none)"
-            # A wrong project name must be loud. Silently searching everything
-            # would answer a question the caller did not ask.
-            raise ValueError(f"unknown project {project!r}; known roots: {known}")
+        selected = self._resolve_selection(project)
 
         hits: list[Hit] = []
         degraded: list[str] = []
@@ -272,10 +315,7 @@ class ForgeSearch:
                 force: Rebuild from scratch rather than incrementally.
             """
             await self._announce(ctx)
-            selected = [r for r in self.roots if project is None or r.label == project]
-            if project is not None and not selected:
-                known = ", ".join(r.label for r in self.roots) or "(none)"
-                raise ValueError(f"unknown project {project!r}; known roots: {known}")
+            selected = self._resolve_selection(project)
 
             report = {}
             for root in selected:
