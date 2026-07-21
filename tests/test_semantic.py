@@ -436,3 +436,16 @@ def test_same_model_keeps_its_vectors(tmp_path):
         before = index.count()
     with SemanticIndex(db, HashingEmbedder(dim=8)) as index:
         assert index.count() == before
+
+
+def test_download_refuses_a_non_https_url(tmp_path, monkeypatch):
+    # bandit flags urlopen because a `file://` or custom scheme would read
+    # something unexpected and store it as the model. The URLs are all
+    # code-controlled today; this makes that a checked property rather than a
+    # comment, so a future spec cannot quietly introduce one.
+    from forge_search.core.model import ModelSpec, download
+
+    monkeypatch.setenv("FORGE_SEARCH_CACHE_DIR", str(tmp_path))
+    spec = ModelSpec(name="evil", files={"model.onnx": "file:///etc/passwd"}, dim=8)
+    with pytest.raises(RuntimeError, match="non-https"):
+        download(spec)

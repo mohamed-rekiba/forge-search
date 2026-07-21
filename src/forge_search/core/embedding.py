@@ -214,7 +214,10 @@ class OnnxEmbedder:
         if "token_type_ids" in expected:
             feeds["token_type_ids"] = np.zeros_like(feeds["input_ids"])
 
-        hidden = self._session.run(None, feeds)[0]
+        # `run` is typed as returning a union that includes SparseTensor and
+        # dict; this model always yields a dense array, and asserting it keeps
+        # the arithmetic below honest rather than silenced.
+        hidden = np.asarray(self._session.run(None, feeds)[0], dtype=np.float32)
 
         # Mean-pool over real tokens only — including padding would drag every
         # vector toward the pad embedding and blur short texts most.

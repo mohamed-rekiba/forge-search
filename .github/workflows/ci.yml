@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.14"
+  UV_VERSION: "0.11.16"
+
+jobs:
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          ignore-nothing-to-cache: true
+      - run: uv sync --all-extras
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+
+  typecheck:
+    name: Type Check (mypy + pyright)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          ignore-nothing-to-cache: true
+      # --all-extras matters: without the semantic extra installed, both
+      # checkers see unresolved imports rather than real types.
+      - run: uv sync --all-extras
+      - run: uv run mypy
+      - run: uv run pyright
+
+  # The suite runs TWICE, in both supported install shapes. This is the
+  # load-bearing job in the file.
+  #
+  # A lexical-only install is a supported configuration, not a degraded one,
+  # and it exercises different code: the semantic modules are never imported,
+  # the arm reports itself absent, search falls back to lexical. A suite run
+  # only with the extra installed never executes any of that, and an
+  # ImportError there reaches a user as a server that will not start.
+  test:
+    name: Tests (${{ matrix.install }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - install: lexical-only
+            sync: "uv sync"
+          - install: with-semantic
+            sync: "uv sync --extra semantic"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          ignore-nothing-to-cache: true
+      # Sync EXACTLY the shape under test. Not `--all-extras` plus a
+      # `--no-extra` flag at run time: that flag does not uninstall anything,
+      # so both legs would import the extra and silently test the same thing.
+      - name: install (${{ matrix.install }})
+        run: ${{ matrix.sync }}
+      - name: pytest (${{ matrix.install }})
+        run: uv run pytest tests -q
+      - name: the lexical-only env must genuinely lack the extra
+        if: matrix.install == 'lexical-only'
+        # Guards the matrix against becoming a no-op again.
+        run: |
+          if uv run python -c "import sqlite_vec" 2>/dev/null; then
+            echo "semantic extra present in the lexical-only leg"; exit 1
+          fi
+
+  # Packaging faults are invisible to the test suite, which imports from
+  # source: a module missing from the wheel or a broken entry point still
+  # passes everything. `serve` has already shipped a startup crash once.
+  # This installs the real artifact and runs it.
+  smoke:
+    name: Wheel smoke test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          ignore-nothing-to-cache: true
+      - name: Build
+        run: uv build --out-dir dist
+      - name: Install the wheel into a clean venv and run it
+        run: |
+          uv venv .smoke
+          VIRTUAL_ENV=.smoke uv pip install "$(ls dist/*.whl | head -1)"
+          .smoke/bin/forge-search --help > /dev/null
+          mkdir -p corpus && echo "validate_token" > corpus/a.md
+          .smoke/bin/forge-search search validate_token --root corpus | grep -q a.md
+      - name: A missing --root must fail loudly, not guess
+        # Nothing is discovered, by design — so the failure has to name the
+        # fix rather than quietly indexing the working directory.
+        run: |
+          if .smoke/bin/forge-search serve 2>err.txt; then
+            echo "expected a non-zero exit"; exit 1
+          fi
+          grep -q -- "--root" err.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7

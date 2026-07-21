@@ -56,9 +56,7 @@ class Client:
             line = self.proc.stdout.readline()
             if not line:
                 assert self.proc.stderr is not None
-                raise AssertionError(
-                    f"server died. stderr:\n{self.proc.stderr.read()}"
-                )
+                raise AssertionError(f"server died. stderr:\n{self.proc.stderr.read()}")
             message = json.loads(line)
             if "id" not in message:
                 self.notifications.append(message)

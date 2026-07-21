@@ -1,0 +1,82 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Daily. A new CVE in a pinned dependency should not wait for the next PR.
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.14"
+  UV_VERSION: "0.11.16"
+
+# The semgrep container job from the original was dropped: its entire value
+# there was a long list of suppressions for one framework's ORM and template
+# internals, none of which exist here. This package reads files, writes
+# SQLite, and speaks JSON-RPC on a pipe.
+jobs:
+  sast:
+    name: SAST (bandit)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: bandit
+        # MEDIUM+ blocks. Note what bandit will flag and why it is correct
+        # here: SQL is assembled with f-strings in index.py and semantic.py.
+        # Those interpolate a table name and a dimension the code itself
+        # chooses — never a query, which is always a bound parameter. If that
+        # ever stops being true, this job should start failing.
+        run: >-
+          uvx bandit -r src
+          --severity-level medium --confidence-level medium
+          -f json -o bandit.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit.json
+          retention-days: 30
+
+  sca:
+    name: SCA (pip-audit)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --all-extras
+      # --skip-editable skips this package itself, which is always editable
+      # in a dev checkout. The gate is the exit code: non-zero on any unfixed
+      # CVE in a third-party dependency. The original carried two
+      # --ignore-vuln entries for the other repo's dependencies; they are
+      # deliberately not copied — an ignore list inherited without checking
+      # whether the CVEs even apply is worse than no ignore list.
+      - name: pip-audit
+        run: uv run --with pip-audit pip-audit --skip-editable
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # gitleaks scans history, not just the tip
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

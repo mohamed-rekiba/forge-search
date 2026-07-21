@@ -27,15 +27,16 @@ from .core.index import LexicalIndex
 from .core.model import download, is_present, model_dir, resolve_model, resolve_reranker
 from .core.query import QueryError
 from .core.rerank import CrossEncoderReranker
-from .core.roots import Root, RootProvider, resolve_roots
+from .core.roots import Resolution, Root, RootProvider, resolve_roots
 from .core.server import DEFAULT_SERVER_NAME, ForgeSearch
 
 __all__ = ["main"]
 
-#: The most recent root resolution, so `serve` can surface it through MCP
-#: metadata instead of stderr. A module-level slot rather than a return-value
-#: change because every caller wants the roots and only one wants the summary.
-_LAST_RESOLUTION: dict[str, object] = {}
+#: The most recent root resolution, so `serve` can report it without every
+#: caller having to thread it through. A module-level slot rather than a
+#: return-value change because every caller wants the roots and only one
+#: wants the summary.
+_LAST_RESOLUTION: Resolution | None = None
 
 #: The VS Code variable clients disagree about. Tolerated, never recommended.
 _VSCODE_WORKSPACE = "${workspaceFolder}"
@@ -100,7 +101,7 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
             # so a wrong cwd is visible rather than silent. Handles the
             # `${workspaceFolder}/sub` form too, since matching only the bare
             # string would leave that failing for a non-obvious reason.
-            path_str = str(Path.cwd()) + path_str[len(_VSCODE_WORKSPACE):]
+            path_str = str(Path.cwd()) + path_str[len(_VSCODE_WORKSPACE) :]
         path = Path(path_str).expanduser().resolve()
         if not path.is_dir():
             # An unexpanded `${...}` is the most likely cause by far, and the
@@ -138,7 +139,8 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
     #
     # Every other subcommand is an ordinary CLI run where stderr is just
     # stderr, and the line is printed.
-    _LAST_RESOLUTION["value"] = resolution
+    global _LAST_RESOLUTION
+    _LAST_RESOLUTION = resolution
     if getattr(args, "quiet_roots", False) and not getattr(args, "verbose", False):
         return list(resolution.roots)
     print(f"forge-search: {resolution.describe()}", file=sys.stderr)
@@ -155,8 +157,7 @@ def _index_dir(args: argparse.Namespace) -> str | None:
     explicit = getattr(args, "index_dir", None)
     if explicit:
         return explicit
-    resolution = _LAST_RESOLUTION.get("value")
-    return getattr(resolution, "index_dir", None)
+    return _LAST_RESOLUTION.index_dir if _LAST_RESOLUTION else None
 
 
 def _embedder(args: argparse.Namespace):
@@ -283,7 +284,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     # cannot see which root is indexed has no way to catch the wrong tree.
     args.quiet_roots = getattr(args, "quiet", False)
     roots = _resolve_roots(args)
-    resolution = _LAST_RESOLUTION.get("value")
+    resolution = _LAST_RESOLUTION
     search = ForgeSearch(
         roots=roots,
         server_name=args.name,

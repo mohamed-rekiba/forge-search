@@ -1,0 +1,45 @@
+name: Release Please
+
+# Opens a release PR on every push to `main`, accumulating conventional
+# commits into a CHANGELOG and a version bump. Merging that PR creates the
+# tag, which is what `publish.yml` fires on.
+#
+# Without this the release path is manual — edit the version in
+# pyproject.toml, write the changelog, tag, push, and keep all four in
+# agreement. publish.yml already refuses a tag that disagrees with
+# pyproject.toml, so a hand-driven release fails at the last step rather than
+# the first.
+#
+# Simplified from a monorepo config: one package at the repo root, so there
+# is no component in the tag. Tags are plain `v0.2.0`, which is exactly what
+# publish.yml matches — the two are coupled, and changing the tag format here
+# means changing the trigger there.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false  # never abandon a half-created release PR
+
+jobs:
+  release-please:
+    name: Open or update the release PR
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .github/release-please-manifest.json
+          # The default GITHUB_TOKEN is enough to open the PR and create the
+          # tag. It deliberately does NOT trigger other workflows, so the tag
+          # push here will not start publish.yml on its own — see the note in
+          # publish.yml about running it manually or swapping in a PAT if you
+          # want the chain fully automatic.
+          token: ${{ secrets.GITHUB_TOKEN }}
