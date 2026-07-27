@@ -30,7 +30,7 @@ semantic = [
 # HTTP transport. Only needed to run as a long-lived shared server instead of
 # a per-session stdio subprocess. See docs/decisions/ on the transport split.
 http = [
-    "fastapi>=0.139.2",
+    "fastapi>=0.140.5",
     "uvicorn>=0.51.0",
 ]
 
