@@ -22,7 +22,7 @@ dependencies = [
 # Both verified to resolve --only-binary=:all: on cp314 (2026-07-21):
 #   sqlite-vec 0.1.9 · onnxruntime 1.27.0
 semantic = [
-    "onnxruntime>=1.27.0",
+    "onnxruntime>=1.28.0",
     "sqlite-vec>=0.1.9",
     "tokenizers>=0.23.1",
 ]
