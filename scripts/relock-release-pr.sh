@@ -62,6 +62,18 @@ if git diff --quiet -- uv.lock; then
     exit 0
 fi
 
+echo "relock: uv.lock changed —"
+git diff --stat -- uv.lock | sed 's/^/  /'
+
+# Validate before pushing. Nothing downstream will: a release PR has no check
+# runs at all, because the GITHUB_TOKEN that opened it cannot trigger
+# `pull_request` workflows. So this is the only place the lockfile about to be
+# released gets verified.
+uv sync --locked --quiet || fail \
+    "the lockfile this just produced does not satisfy pyproject.toml." \
+    "Not pushing it — a release PR has no CI, so a bad lock here would reach" \
+    "the tag unchallenged."
+
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 git add uv.lock

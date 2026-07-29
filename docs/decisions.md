@@ -284,21 +284,26 @@ with the default `GITHUB_TOKEN`, and PRs created by that token do not trigger
 `pull_request` workflows — the same limitation `publish.yml` already documents
 for the release tag. An event-driven re-lock would simply never fire.
 
-**The PR is found by title, not by branch name.** The title pattern is ours, set
-in `release-please-config.json`; the `release-please--branches--…` branch name is
-release-please's internal convention. The action's `pr` output would be the
-obvious third option, but its branch field is undocumented — and the last thing
-this repo pinned on an undocumented assumption about an action was
-`setup-uv@v9`, which broke CI on the spot.
+**The PR is found by title, not by the action's `pr` output.** Not because that
+output is undocumented — `headBranchName` is declared on the `PullRequest`
+interface the README links. The reason is stronger: `pr` is **unset in exactly
+the case that matters**. release-please returns nothing for a PR whose body did
+not change, and the action filters those out, so both `pr` and `prs_created` go
+empty whenever an existing release PR is merely updated rather than created.
+That is the adoption case, and the retry case. The step therefore carries no
+`if:` gate, and finds the PR by the title pattern we configure ourselves.
 
-**Accepted cost:** a `GITHUB_TOKEN` push does not re-run the PR's checks, so the
-release PR's green ticks describe the commit before the re-lock. Tolerable for a
-lockfile-only change, and the reason the re-lock is its own commit with its own
-message rather than folded into the release commit.
+**A release PR has no CI at all.** Not "checks that describe the pre-re-lock
+commit" — zero check runs, because the `GITHUB_TOKEN` that opened it cannot
+trigger `pull_request` workflows. So the lockfile heading for the tag is
+unvalidated by anything downstream, which is why the script runs `uv sync
+--locked` itself and refuses to push a lock that does not satisfy
+`pyproject.toml`. That check is not belt-and-braces; it is the only one there is.
 
-Rejected: adding `uv lock --check` to CI instead. It would catch the drift
-without fixing it, and on a release PR it would fail a check that nothing can
-re-run — leaving every release blocked on a manual local `uv lock`.
+Rejected: adding `uv lock --check` to CI instead. For the same reason — CI never
+runs on a release PR, so a check there cannot see release-time drift. It would
+catch the case where someone hand-edits `pyproject.toml` in an ordinary PR, which
+is a different and much rarer problem.
 
 ---
 

@@ -65,6 +65,12 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
+      # Deliberately NO `if:` gate. `prs_created` is false whenever an open
+      # release PR was merely *updated* rather than created — release-please
+      # returns undefined when the PR body is unchanged, and the action filters
+      # those out of its outputs. Gating on it would skip exactly the case this
+      # exists for: an existing release PR that still carries a stale lock. The
+      # script's own "no open release PR" check is the cheap early exit instead.
       - name: Re-lock the release PR
         run: bash scripts/relock-release-pr.sh
         env:
