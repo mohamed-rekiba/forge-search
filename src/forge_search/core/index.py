@@ -17,16 +17,18 @@ staleness impossible to not notice.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from .cache import ensure_index_dir, index_path_for
 from .query import QueryError, to_fts5
 from .roots import Root
 from .traversal import TraversalConfig, excerpt, walk
 
-__all__ = ["Hit", "IndexStats", "LexicalIndex"]
+__all__ = ["Hit", "IndexHealth", "IndexStats", "LexicalIndex", "inspect_index"]
 
 #: Score assigned to a filename match, chosen to sit above BM25 content scores
 #: rather than being tuned against them. BM25 values here run roughly 0–20
@@ -111,6 +113,96 @@ class IndexStats:
     files_removed: int
     chunks_written: int
     up_to_date: bool
+
+
+@dataclass(frozen=True, slots=True)
+class IndexHealth:
+    """What an index looks like from the outside, without touching it."""
+
+    files: int
+    schema_version: int | None
+    schema_current: bool
+    stale: bool
+    last_refreshed_at: float | None
+    path: Path
+
+
+def inspect_index(
+    root: Root,
+    *,
+    config: TraversalConfig | None = None,
+    index_dir: str | None = None,
+) -> IndexHealth | None:
+    """Report an index's state without opening it for writing.
+
+    Returns None when there is genuinely no index yet. Raises `OSError` or
+    `sqlite3.Error` when there is one but it cannot be read — those are faults a
+    caller must be able to tell apart from absence.
+
+    Why this exists rather than using `LexicalIndex`: that constructor calls
+    `ensure_index_dir`, connects read-write, and then runs `_migrate_if_stale`,
+    which **DELETEs every row** when the stored schema version differs. All
+    three are correct for indexing and disqualifying for inspection — a probe
+    that wipes an index built by a previous release, then truthfully reports it
+    as empty, is the worst kind of wrong.
+    """
+    db = index_path_for(root.label, root.path, index_dir)
+
+    # `Path.exists()` swallows PermissionError and returns False, so an index
+    # directory we cannot read is indistinguishable from one that is not there.
+    # Listing it first forces that difference to surface: FileNotFoundError
+    # means absent, PermissionError propagates as the fault it is.
+    try:
+        os.listdir(db.parent)
+    except FileNotFoundError:
+        return None
+
+    if not db.exists():
+        return None
+
+    # mode=ro: never creates, never migrates, cannot write. A file that is not a
+    # database raises on first query, which the caller reports per root.
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        files = dict(
+            (r[0], (r[1], r[2]))
+            for r in conn.execute("SELECT relpath, size, mtime_ns FROM files")
+        )
+        version_row = conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()
+        refreshed_row = conn.execute(
+            "SELECT value FROM meta WHERE key = 'last_refreshed_at'"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    try:
+        version = int(version_row[0]) if version_row else None
+    except TypeError, ValueError:
+        version = None
+
+    try:
+        refreshed = float(refreshed_row[0]) if refreshed_row else None
+    except TypeError, ValueError:
+        refreshed = None
+
+    on_disk: dict[str, tuple[int, int]] = {}
+    for path in walk(root.path, config or TraversalConfig()):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        on_disk[path.relative_to(root.path).as_posix()] = (st.st_size, st.st_mtime_ns)
+
+    return IndexHealth(
+        files=len(files),
+        schema_version=version,
+        schema_current=version == SCHEMA_VERSION,
+        stale=on_disk != files,
+        last_refreshed_at=refreshed,
+        path=db,
+    )
 
 
 class LexicalIndex:
