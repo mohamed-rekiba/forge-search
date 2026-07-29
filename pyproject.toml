@@ -14,14 +14,26 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# All three are imported directly in `src/`, so all three get their major
+# bounded for the same reason `mcp` does — see the note on `dependencies`
+# above. The two 0.x pins bound at `<1`: pre-1.0 projects are entitled to
+# break on a minor, but a major is the boundary the resolver can actually be
+# stopped at, and pinning minors here would mean churn on every release.
 semantic = [
-    "onnxruntime>=1.28.0",
-    "sqlite-vec>=0.1.9",
-    "tokenizers>=0.23.1",
+    "onnxruntime>=1.28.0,<2",
+    "sqlite-vec>=0.1.9,<1",
+    "tokenizers>=0.23.1,<1",
 ]
 
 # HTTP transport. Only needed to run as a long-lived shared server instead of
 # a per-session stdio subprocess. See docs/decisions/ on the transport split.
+#
+# Deliberately NOT major-bounded, unlike everything above: no forge_search
+# module imports either one. They are declared so the SDK's optional
+# streamable-http transport has what it needs at runtime, and we never touch
+# their API — so there is no import path of ours for a major to break.
+# `tests/test_dependency_bounds.py` encodes that distinction rather than
+# applying the bound rule blindly to every line.
 http = [
     "fastapi>=0.140.13",
     "uvicorn>=0.52.0",
@@ -30,6 +42,11 @@ http = [
 [dependency-groups]
 dev = [
     "mypy>=2.3.0",
+    # `tests/test_dependency_bounds.py` parses version specifiers with this.
+    # It arrives transitively via pytest, which is exactly the kind of
+    # accidental reliance that file exists to catch — so it is declared here
+    # rather than assumed. Test-only: nothing in `src/` imports it.
+    "packaging>=25.0",
     "pyright>=1.1.411",
     "pytest>=9.1.1",
     "ruff>=0.16.0",

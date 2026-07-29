@@ -174,6 +174,59 @@ and renders properly where supported. VS Code's MCP logging support is
 implemented but undocumented, which is reason enough not to depend on it
 alone.
 
+## Dependency majors are adopted, not resolved into
+
+A dependency whose import path this code reaches into has its major bounded.
+Adopting the next one is a deliberate change with the import sites migrated.
+
+**Found by shipping it.** `mcp` was declared `>=1.28.1` with no upper bound. 2.0
+removed `mcp.server.fastmcp`, so a fresh resolve produced a package that
+installed cleanly and then died at import. Nothing failed for existing users,
+because `uv.lock` kept developers and CI on a working version — the breakage
+reached only people installing clean, and surfaced in their client's stderr
+looking like a client fault.
+
+Two options: pin back to `<2`, or adopt 2.x. **Pinning back was rejected.** It
+buys time at the cost of doing the same work later against a larger gap, and
+this project has no external consumers whose upgrade cadence it needs to
+respect. Adopting cost four edit sites and one genuine re-homing (below).
+
+The bound is now expressed as a rule with a test behind it rather than as a
+habit: `tests/test_dependency_bounds.py` asserts on the **declaration**, not the
+installed environment, because the lockfile makes an import-based test pass
+while the published metadata stays broken. It covers `optional-dependencies`
+too — the first version of that test policed `mcp` alone while three
+distributions in the `semantic` extra, all imported in `src/`, stayed
+unbounded. Same defect, still live, one file away.
+
+`fastapi` and `uvicorn` are deliberately exempt: nothing here imports them, so
+there is no import path of ours for their major to break. The rule tracks real
+coupling, not every line in the manifest.
+
+## The logging capability sits on a private SDK attribute
+
+Advertising the `logging` capability requires registering a `logging/setLevel`
+handler, and the SDK offers no public seam for one. `MCPServer` takes no
+`on_set_logging_level` argument, so the handler is registered through
+`mcp._lowlevel_server.add_request_handler(...)` — a public method reached via a
+private attribute.
+
+Accepted knowingly. The alternative is losing the capability, which returns the
+server to the state described above: notifications that are correct on the wire
+and reach nobody. The exposure is pinned behaviourally rather than structurally
+— `tests/test_serve_smoke.py` asserts the capability is actually advertised and
+that a set level is actually honoured, over a real handshake. If a future SDK
+release moves the attribute, those fail rather than the capability silently
+going quiet.
+
+Two related notes. The capability was deprecated in mcp 2.0.0 (SEP-2577); this
+registration path bypasses the SDK's own deprecation warning, which is
+deliberate, because a stdio server must not print to stderr on a healthy
+launch. And the level vocabulary is pinned to the SDK's by a set-equality test:
+the tuple used to order levels omitted `emergency`, and because the comparison
+ran before the announced-flag was set, one missing string turned into a server
+that failed every request permanently once a client asked for that level.
+
 ---
 
 Next: [architecture.md](architecture.md) · [BENCHMARK.md](../BENCHMARK.md)

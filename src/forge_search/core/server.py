@@ -54,7 +54,35 @@ from .traversal import TraversalConfig
 #: the behaviour instead of papering over it.
 Transport = Literal["stdio", "sse", "streamable-http"]
 
-__all__ = ["ForgeSearch", "DEFAULT_SERVER_NAME", "DOC_SUFFIXES", "Transport"]
+#: Log levels in ascending severity, which is what makes `.index()` comparable
+#: in `_announce`. Membership must match `mcp.types.LoggingLevel` exactly — a
+#: level the SDK accepts but this tuple omits raises `ValueError` from
+#: `.index()`, and that call sits *above* the `_announced = True` assignment, so
+#: the flag never gets set and the failure repeats on every subsequent request.
+#: `emergency` was missing for exactly that reason: a client that set it got a
+#: cheerful empty response and then a permanently broken server, surfacing to
+#: the user as the *tool* failing rather than as a logging problem.
+#:
+#: Exported so `tests/test_server.py` can assert set-equality against the SDK's
+#: own vocabulary. Order is ours (severity); membership is the SDK's.
+LOG_LEVELS: tuple[str, ...] = (
+    "debug",
+    "info",
+    "notice",
+    "warning",
+    "error",
+    "critical",
+    "alert",
+    "emergency",
+)
+
+__all__ = [
+    "ForgeSearch",
+    "DEFAULT_SERVER_NAME",
+    "DOC_SUFFIXES",
+    "LOG_LEVELS",
+    "Transport",
+]
 
 #: Default MCP server name. Configurable, because a standalone tool must not
 #: assume an integration's identity — and because registering under another
@@ -372,9 +400,9 @@ class ForgeSearch:
         if self._announced or not self.summary:
             return
         # Ordered by severity; anything below the client's requested level is
-        # dropped rather than sent and ignored.
-        levels = ("debug", "info", "notice", "warning", "error", "critical", "alert")
-        if levels.index("info") < levels.index(self._min_log_level):
+        # dropped rather than sent and ignored. See LOG_LEVELS on why membership
+        # is pinned to the SDK's vocabulary by a test.
+        if LOG_LEVELS.index("info") < LOG_LEVELS.index(self._min_log_level):
             self._announced = True
             return
         self._announced = True

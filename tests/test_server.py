@@ -15,7 +15,7 @@ import pytest
 
 from forge_search.core.query import QueryError
 from forge_search.core.roots import Root
-from forge_search.core.server import MAX_TOP_K, ForgeSearch
+from forge_search.core.server import LOG_LEVELS, MAX_TOP_K, ForgeSearch
 
 
 @pytest.fixture(autouse=True)
@@ -292,3 +292,55 @@ class TestDynamicRootDiscovery:
                 fs._search("x", project="beta", top_k=10, doc_only=False)
         finally:
             fs.close()
+
+
+class TestLogLevelHandling:
+    """Every level the SDK accepts must be orderable.
+
+    `_announce` compares the client's requested level against `info` by tuple
+    position. A level the tuple omits raises `ValueError` from `.index()` — and
+    that call sits *above* the `self._announced = True` assignment, so the flag
+    is never set and the failure repeats on every subsequent request. One
+    missing string turns into a permanently broken server, and the client sees
+    it as the tool failing rather than as a logging problem.
+    """
+
+    def test_log_levels_cover_every_sdk_level(self) -> None:
+        """Drift guard: the SDK owns this vocabulary, so ours must match it.
+
+        Asserted as a set because the tuple's *order* is ours to choose
+        (ascending severity, which the comparison depends on) while its
+        *membership* is the SDK's to define.
+        """
+        from typing import get_args
+
+        from mcp import types
+
+        assert set(LOG_LEVELS) == set(get_args(types.LoggingLevel)), (
+            "LOG_LEVELS has drifted from mcp's LoggingLevel. A level the SDK "
+            "accepts but this tuple omits makes _announce raise ValueError on "
+            "every request, permanently."
+        )
+
+    @pytest.mark.parametrize("level", ["debug", "alert", "emergency"])
+    def test_announce_survives_every_level(self, search: ForgeSearch, level: str) -> None:
+        """Setting any valid level must not break the announce path."""
+
+        class _Ctx:
+            def __init__(self) -> None:
+                self.messages: list[str] = []
+
+            async def info(self, message: str) -> None:
+                self.messages.append(message)
+
+        search.summary = "probe"
+        search._announced = False
+        search._min_log_level = level
+
+        ctx = _Ctx()
+        # Twice: the second call proves the announced-flag was actually set, so
+        # a failure cannot silently repeat forever.
+        asyncio.run(search._announce(ctx))  # type: ignore[arg-type]
+        asyncio.run(search._announce(ctx))  # type: ignore[arg-type]
+
+        assert search._announced is True

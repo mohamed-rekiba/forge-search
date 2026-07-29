@@ -280,6 +280,7 @@ semantic = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "packaging" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "ruff" },
@@ -289,9 +290,9 @@ dev = [
 requires-dist = [
     { name = "fastapi", marker = "extra == 'http'", specifier = ">=0.140.13" },
     { name = "mcp", specifier = ">=2.0.0,<3" },
-    { name = "onnxruntime", marker = "extra == 'semantic'", specifier = ">=1.28.0" },
-    { name = "sqlite-vec", marker = "extra == 'semantic'", specifier = ">=0.1.9" },
-    { name = "tokenizers", marker = "extra == 'semantic'", specifier = ">=0.23.1" },
+    { name = "onnxruntime", marker = "extra == 'semantic'", specifier = ">=1.28.0,<2" },
+    { name = "sqlite-vec", marker = "extra == 'semantic'", specifier = ">=0.1.9,<1" },
+    { name = "tokenizers", marker = "extra == 'semantic'", specifier = ">=0.23.1,<1" },
     { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.52.0" },
 ]
 provides-extras = ["semantic", "http"]
@@ -299,6 +300,7 @@ provides-extras = ["semantic", "http"]
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=2.3.0" },
+    { name = "packaging", specifier = ">=25.0" },
     { name = "pyright", specifier = ">=1.1.411" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.16.0" },

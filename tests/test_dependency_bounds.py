@@ -26,18 +26,58 @@ from pathlib import Path
 import pytest
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
+from packaging.version import Version
 
 PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
+SRC = Path(__file__).resolve().parent.parent / "src"
+
+#: Declared distributions whose Python API this project imports directly, mapped
+#: to the module name as it appears in `src/`. These are the ones whose major
+#: must be bounded: a major bump is exactly where an import path may vanish,
+#: which is the defect that broke every fresh install.
+#:
+#: `fastapi` and `uvicorn` are deliberately absent. They are declared to satisfy
+#: the SDK's optional HTTP transport, and no `forge_search` module imports them
+#: — so there is no import path of ours for their major to break. The mapping is
+#: kept honest by `test_every_listed_distribution_is_actually_imported`.
+IMPORTED_DISTRIBUTIONS = {
+    "mcp": "mcp",
+    "onnxruntime": "onnxruntime",
+    "sqlite-vec": "sqlite_vec",
+    "tokenizers": "tokenizers",
+}
 
 
 def _declared_requirements() -> dict[str, SpecifierSet]:
-    """Map every declared runtime dependency name to its version specifier."""
+    """Map every declared dependency name to its version specifier.
+
+    Covers `project.dependencies` **and** every `project.optional-dependencies`
+    group. Reading only the former was the original oversight: the lesson of the
+    `mcp` breakage got applied to one declared dependency while three others,
+    all imported in `src/`, stayed unbounded in the `semantic` extra.
+    """
     data = tomllib.loads(PYPROJECT.read_text())
+    groups = [data["project"].get("dependencies", [])]
+    groups += list(data["project"].get("optional-dependencies", {}).values())
+
     reqs = {}
-    for raw in data["project"]["dependencies"]:
-        req = Requirement(raw)
-        reqs[req.name] = req.specifier
+    for group in groups:
+        for raw in group:
+            req = Requirement(raw)
+            reqs[req.name] = req.specifier
     return reqs
+
+
+def _next_major(spec: SpecifierSet) -> str:
+    """The lowest version that a correctly-bounded specifier must exclude.
+
+    Derived from the specifier's own floor rather than hardcoded, so raising a
+    floor never silently invalidates the assertion.
+    """
+    floors = [s.version for s in spec if s.operator in (">=", "==", "~=")]
+    assert floors, f"no floor found in {spec!r} — cannot derive the next major"
+    major = int(Version(min(floors, key=Version)).major)
+    return f"{major + 1}.0.0"
 
 
 class TestMcpMajorIsBounded:
@@ -73,6 +113,55 @@ class TestMcpMajorIsBounded:
             f"mcp{spec} admits {version}. Majors must be adopted deliberately, "
             "with the import sites migrated, not picked up by a resolver. That "
             "is exactly how the 1.x→2.0 breakage reached users."
+        )
+
+
+class TestEveryImportedDependencyIsBounded:
+    """The rule applies to all of them, not just the one that broke.
+
+    The `mcp` incident produced a policy — bound the major of anything whose
+    import path you reach into — and then applied it to `mcp` alone. Three
+    further distributions in the `semantic` extra are imported throughout
+    `src/` and were left unbounded, so the identical failure was still
+    available: `onnxruntime` 2.0 or `tokenizers` 1.0 removing something we
+    import, resolved automatically into a fresh install.
+    """
+
+    @pytest.mark.parametrize("dist", sorted(IMPORTED_DISTRIBUTIONS))
+    def test_declared(self, dist: str) -> None:
+        assert dist in _declared_requirements(), (
+            f"{dist} is imported in src/ but not declared in pyproject.toml — "
+            "so nothing pins the version the code is written against."
+        )
+
+    @pytest.mark.parametrize("dist", sorted(IMPORTED_DISTRIBUTIONS))
+    def test_major_is_bounded(self, dist: str) -> None:
+        spec = _declared_requirements()[dist]
+        nxt = _next_major(spec)
+        assert nxt not in spec, (
+            f"{dist}{spec} admits {nxt}. {dist} is imported directly in src/, "
+            "so a major bump may remove the API this code uses — exactly how "
+            "the mcp 1.x→2.0 breakage reached every fresh install. Bound it."
+        )
+
+    @pytest.mark.parametrize("dist,module", sorted(IMPORTED_DISTRIBUTIONS.items()))
+    def test_every_listed_distribution_is_actually_imported(
+        self, dist: str, module: str
+    ) -> None:
+        """Keeps the mapping honest.
+
+        If a dependency stops being imported it should leave this list, so the
+        bound requirement tracks real coupling rather than becoming folklore.
+        """
+        hits = [
+            p
+            for p in SRC.rglob("*.py")
+            if f"import {module}" in p.read_text() or f"from {module}" in p.read_text()
+        ]
+        assert hits, (
+            f"{dist} is listed as imported (module {module!r}) but no file under "
+            "src/ imports it. Either the mapping is stale or the dependency is "
+            "no longer needed."
         )
 
 
