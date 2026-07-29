@@ -227,6 +227,22 @@ the tuple used to order levels omitted `emergency`, and because the comparison
 ran before the announced-flag was set, one missing string turned into a server
 that failed every request permanently once a client asked for that level.
 
+## Actions float on major tags
+
+Workflow actions are pinned to a major tag (`@v7`), not a patch (`@v7.0.1`) or a
+commit SHA.
+
+Floating majors take security patches without a PR. SHA pinning is stronger —
+it is the only form a moved tag cannot subvert — but it opts out of exactly
+those automatic patches, so every fix becomes a PR someone has to notice. For a
+repo of this size the patch-adoption risk is the larger one.
+
+`setup-uv` was patch-pinned for a while, which is why Dependabot filed a PR for
+each of its releases and none for the others. Now it floats like the rest.
+
+Revisit if these workflows ever handle a secret worth stealing; the publish
+workflow already touches PyPI, so this is not settled forever.
+
 ---
 
 Next: [architecture.md](architecture.md) · [BENCHMARK.md](../BENCHMARK.md)
