@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 from .core.bench import BenchQuery, run_bench
+from .core.cache import index_path_for
 from .core.embedding import HashingEmbedder, OnnxEmbedder
 from .core.hybrid import HybridIndex
 from .core.index import LexicalIndex
@@ -347,6 +348,58 @@ def _cmd_index(args: argparse.Namespace) -> int:
     return 0
 
 
+def _semantic_status() -> str:
+    """Whether the semantic arm could run, without making it run.
+
+    Imports are the whole check: the extra is either installed or not. A model
+    is NOT fetched — `warm` exists for that, and a probe that downloads ~90 MB
+    would be a trap in a session-start hook.
+    """
+    try:
+        import onnxruntime  # noqa: F401
+        import sqlite_vec  # noqa: F401
+        import tokenizers  # noqa: F401
+    except ImportError as exc:
+        return f"unavailable ({exc.name} not installed) — lexical-only"
+    return "available"
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    """Report health without changing any of it.
+
+    Exit 0 means "this install can answer queries". A missing or stale index is
+    NOT a failure — search creates and refreshes indexes on the read path, so
+    both are ordinary states, and reporting them as errors would make the exit
+    code useless as a liveness probe.
+
+    Never constructs a LexicalIndex for a root whose index is absent:
+    `__init__` calls ensure_index_dir + connect, so doing so would create the
+    thing it was asked to look for. `index_path_for` is pure, so existence is
+    checked first and the index is only opened when it is already there.
+    """
+    index_dir = _index_dir(args)
+    print(f"semantic arm: {_semantic_status()}")
+
+    roots = _resolve_roots(args)
+    adapter = getattr(args, "adapter", None)
+    print(f"roots: {len(roots)}" + (f" (adapter: {adapter})" if adapter else ""))
+
+    for root in roots:
+        db = index_path_for(root.label, root.path, index_dir)
+        if not db.exists():
+            # Cold start, not a fault. Say where it *will* go, so a wrong
+            # --index-dir is visible here rather than after a confusing search.
+            print(f"  {root.label}: no index yet — will be created at {db}")
+            continue
+        with LexicalIndex(root, index_dir=index_dir) as index:
+            freshness = "stale" if index.is_stale() else "fresh"
+            print(
+                f"  {root.label}: {index.indexed_count()} files indexed, "
+                f"{freshness} ({db})"
+            )
+    return 0
+
+
 def _cmd_search(args: argparse.Namespace) -> int:
     roots = _resolve_roots(args)
     search = ForgeSearch(roots=roots, embedder=_embedder(args))
@@ -446,6 +499,13 @@ def main(argv: list[str] | None = None) -> int:
     index.add_argument("--force", action="store_true", help="Rebuild from scratch")
     index.set_defaults(func=_cmd_index)
 
+    doctor = sub.add_parser(
+        "doctor",
+        help="Report index health. Exits 0 when the install can serve queries.",
+    )
+    _add_root_args(doctor)
+    doctor.set_defaults(func=_cmd_doctor)
+
     search = sub.add_parser("search", help="One-shot search")
     _add_root_args(search)
     search.add_argument("query")
@@ -462,7 +522,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     search.set_defaults(func=_cmd_search)
 
-    for _p in (serve, index, search):
+    # doctor included deliberately: without it, doctor resolves the default
+    # index location and reports a correctly-indexed root as unindexed.
+    for _p in (serve, index, doctor, search):
         _index_dir_flag(_p)
 
     warm = sub.add_parser("warm", help="Fetch the embedding model (semantic arm)")
