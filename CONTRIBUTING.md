@@ -18,7 +18,7 @@ make ci     # lint, format, typecheck, tests in both shapes, coverage floor
 | `make test` | The suite in **both** install shapes |
 | `make coverage` | Both shapes, combined, floor enforced |
 | `make typecheck` | mypy + pyright, `src` only |
-| `make smoke` | Installs the built wheel in a clean venv and runs it |
+| `make smoke` | Installs the built wheel in a clean venv and runs it (`scripts/smoke.sh`) |
 | `make security` | bandit + pip-audit |
 | `make bench ROOT=<path>` | Answer-recall benchmark against a corpus |
 

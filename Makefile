@@ -100,24 +100,7 @@ build:  ## Build sdist + wheel
 
 .PHONY: smoke
 smoke: build  ## Install the built wheel into a clean venv and actually run it
-	@# Catches packaging faults no test can see: a module missing from the
-	@# wheel, a broken entry point, an import that only resolves from source.
-	rm -rf .smoke && uv venv .smoke --quiet
-	@# Unquoted glob on purpose: `build` leaves exactly one wheel, so this
-	@# resolves to it. If it ever resolves to two, uv fails loudly instead of
-	@# installing whichever one sorted first.
-	VIRTUAL_ENV=.smoke uv pip install --quiet dist/*.whl
-	.smoke/bin/forge-search --help > /dev/null
-	@mkdir -p .smoke/corpus && echo "validate_token" > .smoke/corpus/a.md
-	.smoke/bin/forge-search search validate_token --root .smoke/corpus | grep -q a.md
-	@# Nothing is discovered, by design, so a missing --root has to name the fix
-	@# rather than quietly index the working directory.
-	@if .smoke/bin/forge-search serve 2>.smoke/err.txt; then \
-		echo "expected a non-zero exit when --root is missing"; exit 1; \
-	fi
-	@grep -q -- "--root" .smoke/err.txt
-	@echo "smoke: wheel installs, CLI runs, search hits, missing --root fails loudly"
-	@rm -rf .smoke
+	bash scripts/smoke.sh
 
 pre-commit:  ## Run all pre-commit hooks across the repo
 	uv run pre-commit run --all-files
