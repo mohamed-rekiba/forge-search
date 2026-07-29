@@ -1,10 +1,14 @@
 """Command-line entry point.
 
-Three subcommands:
+Subcommands:
 
   serve     run the MCP server (the normal use)
   index     build or refresh indexes without serving
+  reindex   refresh, optionally skipping indexes refreshed recently
+  doctor    report index health; non-zero exit if anything is unserviceable
   search    one-shot search, for checking behaviour without an MCP client
+  warm      download the embedding model ahead of first use
+  bench     measure whether the semantic arm earns its cost
 
 ``search`` matters more than its size suggests: it is how you verify the tool
 actually finds things in a real repository, without a client in the loop. The
