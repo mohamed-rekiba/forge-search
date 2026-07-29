@@ -26,7 +26,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.14"
-  UV_VERSION: "0.11.16"
+  UV_VERSION: "0.12.0"
 
 # The semgrep container job from the original was dropped: its entire value
 # there was a long list of suppressions for one framework's ORM and template
@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@v9
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@v9
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}

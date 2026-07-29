@@ -1,4 +1,16 @@
 name: CI
+#
+# On action pinning, because the versions here look inconsistent and are not.
+# Most actions are pinned to a floating MAJOR tag (`@v7`, `@v8`, `@v3`), which
+# adopts minor and patch releases automatically — so `@v7` already *is* the
+# latest v7 and repinning it to `@v7.0.1` would opt out of that, not update it.
+# `setup-uv` used to be the lone patch-pinned exception, which is why Dependabot
+# filed a PR for every one of its patches; it now floats like the rest.
+#
+# The stronger posture is SHA pinning, which trades automatic patch adoption for
+# supply-chain immutability. That is a real decision with a real cost and has
+# not been taken here — see the tracking issue rather than assuming this file
+# simply drifted.
 
 on:
   push:
@@ -15,7 +27,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.14"
-  UV_VERSION: "0.11.16"
+  UV_VERSION: "0.12.0"
 
 jobs:
   lint:
@@ -23,7 +35,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@v9
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
@@ -38,7 +50,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@v9
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
@@ -71,7 +83,7 @@ jobs:
             sync: "uv sync --extra semantic"
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@v9
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
@@ -101,7 +113,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@v9
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
