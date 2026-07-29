@@ -23,7 +23,9 @@ cleanup() {
     status=$?
     if [ "$status" -eq 0 ]; then
         rm -rf "$VENV"
-    else
+    elif [ -d "$VENV" ]; then
+        # Guarded: the trap is installed before the venv exists, so an early
+        # failure would otherwise announce a directory that was never created.
         echo "smoke: leaving $VENV in place for inspection" >&2
     fi
     exit "$status"
@@ -72,11 +74,18 @@ echo "validate_token" > "$CORPUS/a.md"
 # pipefail promotes that to the pipeline's status — failing an assertion whose
 # search actually succeeded. A false alarm here is the same kind of harm as the
 # silent failure this script exists to prevent.
-"$VENV/bin/forge-search" search validate_token --root "$CORPUS" >"$STDOUT" 2>&1
+#
+# stdout and stderr go to separate files, and only stdout is grepped. Merging
+# them lets a stderr line that happens to name a corpus file — `warning: skipped
+# a.md` — satisfy the grep while stdout held no result at all. That failure is
+# worse than the one above: it passes quietly instead of complaining.
+"$VENV/bin/forge-search" search validate_token --root "$CORPUS" \
+    >"$STDOUT" 2>"$STDERR"
 if ! grep -q a.md "$STDOUT"; then
     fail "the wheel installed and ran, but a search over a one-file corpus" \
-         "returned no hit, so the packaged CLI is not finding content. It printed:" \
-         "$(cat "$STDOUT")"
+         "returned no hit, so the packaged CLI is not finding content." \
+         "stdout was:" "$(cat "$STDOUT")" \
+         "stderr was:" "$(cat "$STDERR")"
 fi
 
 # Nothing is discovered, by design. A missing --root has to name the fix rather
