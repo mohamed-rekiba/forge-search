@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/mohamed-rekiba/forge-search/compare/v0.5.0...v0.6.0) (2026-07-29)
+
+
+### Features
+
+* **#25:** report index refresh age, fix relative root paths, and add a coverage floor ([#38](https://github.com/mohamed-rekiba/forge-search/issues/38)) ([0a2d885](https://github.com/mohamed-rekiba/forge-search/commit/0a2d88583125fdf90163517be60a93fadbc59e17))
+
 ## [0.5.0](https://github.com/mohamed-rekiba/forge-search/compare/v0.4.2...v0.5.0) (2026-07-29)
 
 
