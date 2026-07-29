@@ -63,8 +63,11 @@ Transport = Literal["stdio", "sse", "streamable-http"]
 #: cheerful empty response and then a permanently broken server, surfacing to
 #: the user as the *tool* failing rather than as a logging problem.
 #:
-#: Exported so `tests/test_server.py` can assert set-equality against the SDK's
-#: own vocabulary. Order is ours (severity); membership is the SDK's.
+#: Exported so `tests/test_server.py` can pin both halves independently:
+#: set-equality against the SDK's vocabulary (membership is the SDK's), and
+#: exact-tuple equality plus emit/suppress assertions (order is ours). Both are
+#: needed — sorting this tuple alphabetically keeps every member and silently
+#: inverts the filter, so a set check alone passes while the behaviour breaks.
 LOG_LEVELS: tuple[str, ...] = (
     "debug",
     "info",

@@ -29,11 +29,20 @@ semantic = [
 # a per-session stdio subprocess. See docs/decisions/ on the transport split.
 #
 # Deliberately NOT major-bounded, unlike everything above: no forge_search
-# module imports either one. They are declared so the SDK's optional
-# streamable-http transport has what it needs at runtime, and we never touch
-# their API — so there is no import path of ours for a major to break.
-# `tests/test_dependency_bounds.py` encodes that distinction rather than
-# applying the bound rule blindly to every line.
+# module imports either one, so there is no import path of ours for a major to
+# break. `tests/test_dependency_bounds.py` encodes that distinction rather than
+# applying the bound rule blindly to every line in the manifest.
+#
+# Both entries are questionable on other grounds, though, and the honest state
+# is "not yet decided" rather than a reason:
+#   - `uvicorn` is already an unconditional requirement of `mcp` itself
+#     (`uvicorn>=0.31.1; sys_platform != 'emscripten'`), so declaring it here
+#     is redundant rather than load-bearing.
+#   - `fastapi` appears to be vestigial: the SDK's HTTP transport is built on
+#     **starlette**, which `mcp` also requires directly. Nothing in this
+#     project or its dependency graph is known to need fastapi.
+# Removing either changes what `[http]` promises, so it is a separate decision
+# from this change. Tracked rather than guessed at.
 http = [
     "fastapi>=0.140.13",
     "uvicorn>=0.52.0",

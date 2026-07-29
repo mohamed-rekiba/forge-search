@@ -322,9 +322,48 @@ class TestLogLevelHandling:
             "every request, permanently."
         )
 
-    @pytest.mark.parametrize("level", ["debug", "alert", "emergency"])
-    def test_announce_survives_every_level(self, search: ForgeSearch, level: str) -> None:
-        """Setting any valid level must not break the announce path."""
+    def test_log_levels_are_in_ascending_severity(self) -> None:
+        """The tuple's ORDER is load-bearing, not decorative.
+
+        `_announce` decides whether to emit by comparing tuple positions, so a
+        mis-ordered tuple silently inverts the filter — a client asking for
+        `emergency` would start receiving `info` notifications. Set-equality
+        above deliberately cannot catch that: sorting the tuple alphabetically
+        satisfies it while breaking the comparison entirely.
+        """
+        assert LOG_LEVELS == (
+            "debug",
+            "info",
+            "notice",
+            "warning",
+            "error",
+            "critical",
+            "alert",
+            "emergency",
+        ), (
+            "LOG_LEVELS must stay in ascending severity — _announce compares "
+            "positions, so reordering changes which notifications are sent."
+        )
+
+    @pytest.mark.parametrize(
+        "level,expect_message",
+        [
+            ("debug", True),  # below info — the summary still qualifies
+            ("info", True),  # equal to info — emitted
+            ("warning", False),  # above info — suppressed
+            ("alert", False),
+            ("emergency", False),  # the level that used to crash outright
+        ],
+    )
+    def test_announce_respects_the_requested_level(
+        self, search: ForgeSearch, level: str, expect_message: bool
+    ) -> None:
+        """Every valid level is orderable AND filters correctly.
+
+        Asserting on the emitted messages is what makes this a real test of the
+        ordering. Without it an alphabetically-sorted LOG_LEVELS passes, which
+        is exactly how the order went unverified the first time.
+        """
 
         class _Ctx:
             def __init__(self) -> None:
@@ -338,9 +377,18 @@ class TestLogLevelHandling:
         search._min_log_level = level
 
         ctx = _Ctx()
-        # Twice: the second call proves the announced-flag was actually set, so
-        # a failure cannot silently repeat forever.
-        asyncio.run(search._announce(ctx))  # type: ignore[arg-type]
         asyncio.run(search._announce(ctx))  # type: ignore[arg-type]
 
+        assert bool(ctx.messages) is expect_message, (
+            f"level {level!r}: expected "
+            f"{'a notification' if expect_message else 'silence'}, got "
+            f"{len(ctx.messages)} message(s)"
+        )
+        # The flag must be set either way — it is what stops a second attempt,
+        # and leaving it unset is how the emergency crash became permanent.
         assert search._announced is True
+
+        # A second call must not re-emit, whatever the level.
+        before = len(ctx.messages)
+        asyncio.run(search._announce(ctx))  # type: ignore[arg-type]
+        assert len(ctx.messages) == before, "the summary was announced twice"
