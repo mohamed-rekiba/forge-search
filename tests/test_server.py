@@ -64,10 +64,12 @@ class TestToolRegistration:
         fs = ForgeSearch(roots=[Root(label="r", path=tmp_path)])
         tools = {t.name: t for t in asyncio.run(fs.build().list_tools())}
 
-        assert tools["search_code"].inputSchema["required"] == ["query"]
+        # mcp 2.x renamed the model fields to snake_case (`inputSchema` →
+        # `input_schema`); the JSON wire keys are unchanged.
+        assert tools["search_code"].input_schema["required"] == ["query"]
         assert (
-            "required" not in tools["reindex"].inputSchema
-            or not tools["reindex"].inputSchema["required"]
+            "required" not in tools["reindex"].input_schema
+            or not tools["reindex"].input_schema["required"]
         )
         fs.close()
 
@@ -175,8 +177,12 @@ class TestReindexTool:
     def test_reindex_reports_per_root(self, search: ForgeSearch) -> None:
         mcp = search.build()
         result = asyncio.run(mcp.call_tool("reindex", {}))
-        payload = result[1] if isinstance(result, tuple) else result
+        # mcp 2.x returns a `CallToolResult` rather than a
+        # (content, structured) tuple; the dict a tool returns arrives on
+        # `.structured_content`.
+        payload = result.structured_content
 
+        assert payload is not None
         assert set(payload["roots"]) == {"alpha", "beta"}
 
     def test_reindex_unknown_project_raises(self, search: ForgeSearch) -> None:
@@ -187,7 +193,7 @@ class TestReindexTool:
         including the wrong one. The message is the part that makes the error
         actionable, so that is what gets checked.
         """
-        from mcp.server.fastmcp.exceptions import ToolError
+        from mcp.server.mcpserver.exceptions import ToolError
 
         mcp = search.build()
         with pytest.raises(ToolError, match="unknown project"):

@@ -3,8 +3,8 @@
 Exposes three tools — ``search_code``, ``search_docs``, ``reindex`` — over
 whichever transport the caller selects.
 
-**On transport:** the MCP SDK (1.28.1) supports ``stdio``, ``sse``, and
-``streamable-http`` natively via ``FastMCP.run(transport=...)``. No web
+**On transport:** the MCP SDK (2.x) supports ``stdio``, ``sse``, and
+``streamable-http`` natively via ``MCPServer.run(transport=...)``. No web
 framework is needed for the HTTP case; adding one would duplicate what the SDK
 already provides. ``stdio`` is the default because a per-session subprocess has
 the simplest lifecycle — the client owns spawn and kill, there is no port, and
@@ -31,9 +31,11 @@ import logging
 import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp import types
+from mcp.server import ServerRequestContext
+from mcp.server.mcpserver import Context, MCPServer
 
 from .embedding import Embedder
 from .fusion import ArmWeights
@@ -44,7 +46,15 @@ from .rerank import Reranker
 from .roots import Root
 from .traversal import TraversalConfig
 
-__all__ = ["ForgeSearch", "DEFAULT_SERVER_NAME", "DOC_SUFFIXES"]
+#: The transports the SDK supports. Spelled out as a Literal rather than `str`
+#: because mcp 2.x overloads `MCPServer.run` per transport — an unconstrained
+#: `str` matches no overload, and the previous `# type: ignore` merely hid that
+#: the type was wider than reality. The CLI already restricts the value to
+#: these three via argparse `choices`, so this makes the annotation agree with
+#: the behaviour instead of papering over it.
+Transport = Literal["stdio", "sse", "streamable-http"]
+
+__all__ = ["ForgeSearch", "DEFAULT_SERVER_NAME", "DOC_SUFFIXES", "Transport"]
 
 #: Default MCP server name. Configurable, because a standalone tool must not
 #: assume an integration's identity — and because registering under another
@@ -220,8 +230,8 @@ class ForgeSearch:
 
     # -- MCP wiring --------------------------------------------------------
 
-    def build(self) -> FastMCP:
-        mcp = FastMCP(
+    def build(self) -> MCPServer:
+        mcp = MCPServer(
             name=self.server_name,
             instructions=(
                 "Search code and docs across one or more repositories. "
@@ -233,17 +243,34 @@ class ForgeSearch:
         )
 
         # Advertise the `logging` capability. The SDK only declares it when a
-        # logging/setLevel handler is registered, and FastMCP registers none —
-        # so without this the server sends notifications/message that a
+        # `logging/setLevel` handler is registered, and MCPServer registers
+        # none — so without this the server sends notifications/message that a
         # spec-compliant client is entitled to drop, and VS Code does exactly
         # that. The notification looked correct on the wire and still reached
         # nobody.
-        @mcp._mcp_server.set_logging_level()
-        async def _set_level(level: str) -> None:
+        #
+        # mcp 2.x removed the 1.x `@server.set_logging_level()` decorator in
+        # favour of a generic `add_request_handler(method, params_type,
+        # handler)`. The capability check itself is unchanged in substance:
+        # `get_capabilities()` looks for the literal `"logging/setLevel"` key in
+        # the handler table, so registering it is still what flips the
+        # capability on. Reaching through `_lowlevel_server` stays a private-API
+        # dependency — the SDK offers no public seam for this — so it is pinned
+        # by `tests/test_serve_smoke.py`, which asserts the capability is
+        # actually advertised rather than that this line exists.
+        async def _set_level(
+            ctx: ServerRequestContext[Any],
+            params: types.SetLevelRequestParams,
+        ) -> types.EmptyResult:
             # Honoured for real: a client asking for `warning` should not keep
             # receiving `info`. Accepting the request and ignoring it would be
             # its own quiet lie.
-            self._min_log_level = level
+            self._min_log_level = params.level
+            return types.EmptyResult()
+
+        mcp._lowlevel_server.add_request_handler(
+            "logging/setLevel", types.SetLevelRequestParams, _set_level
+        )
 
         @mcp.tool(
             name="search_code",
@@ -357,7 +384,7 @@ class ForgeSearch:
             # Never let a log notification break a search.
             pass
 
-    def run(self, transport: str = "stdio") -> None:
+    def run(self, transport: Transport = "stdio") -> None:
         """Serve. See the module docstring on transport choice."""
         # The MCP SDK logs every request at INFO ("Processing request of type
         # ListToolsRequest"). On stdio that goes to stderr — the only channel
@@ -374,7 +401,7 @@ class ForgeSearch:
                 os.environ["FORGE_SEARCH_LOG_LEVEL"].upper()
             )
 
-        self.build().run(transport=transport)  # type: ignore[arg-type]
+        self.build().run(transport=transport)
 
 
 def _is_doc(path: str) -> bool:

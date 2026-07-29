@@ -100,8 +100,8 @@ and if so expands it into the several labelled roots it really contains.
 
 ```python
 class RootProvider:
-    name: str = ""                      # what `--adapter <name>` selects
-    index_dir: str | None = None        # optionally moves the default index location
+    name: str = ""  # what `--adapter <name>` selects
+    index_dir: str | None = None  # optionally moves the default index location
 
     def expand(self, root: Root) -> Sequence[Root]:
         return [root]
