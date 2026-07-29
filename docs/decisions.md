@@ -199,9 +199,36 @@ too — the first version of that test policed `mcp` alone while three
 distributions in the `semantic` extra, all imported in `src/`, stayed
 unbounded. Same defect, still live, one file away.
 
-`fastapi` and `uvicorn` are deliberately exempt: nothing here imports them, so
-there is no import path of ours for their major to break. The rule tracks real
-coupling, not every line in the manifest.
+The rule now also runs the other way. The first version checked listed →
+imported, so a declaration could not go stale — but nothing checked imported →
+listed, and `numpy` sat outside the guard entirely: used by both the embedder
+and the reranker, declared nowhere, arriving only as a transitive of
+`onnxruntime` under an unbounded `numpy>=1.21.6`. A third party's requirement
+was choosing the major this code ran against. It is declared in the `semantic`
+extra now, where its two function-local call sites live.
+
+## The [http] extra is a no-op alias
+
+HTTP transport needs no extra. `mcp` requires starlette and uvicorn
+unconditionally, so a base install already has what both the `streamable-http`
+and `sse` transports use. Confirmed by installing nothing but the wheel into a
+clean venv and starting each transport: both bind, `/mcp` answers on the first
+and `/sse` on the second.
+
+So the extra's two entries were a redundant `uvicorn` and a `fastapi` that
+nothing in this project or its dependency graph ever imported — a substantial
+install carried for no reason, on a project that keeps its base install small
+and compiler-free on purpose.
+
+**Kept as an empty alias rather than removed.** Deleting it would make
+`forge-search[http]` stop resolving, which breaks an install line for no gain;
+an empty extra resolves to nothing and documents itself. Worth revisiting at
+1.0, where dropping it is a reasonable thing to do in a major.
+
+This also corrects a reason recorded here earlier — that the two were exempt
+from the bound rule because nothing imports them. True as far as it went, and
+the wrong conclusion: nothing importing them was the argument for removing
+them, not for leaving them declared.
 
 ## The logging capability sits on a private SDK attribute
 

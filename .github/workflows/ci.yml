@@ -87,7 +87,18 @@ jobs:
       - name: install (${{ matrix.install }})
         run: ${{ matrix.sync }}
       - name: pytest (${{ matrix.install }})
-        run: uv run pytest tests -q
+        # The floor is checked on the combined total in the `coverage` job, so
+        # this leg records data without enforcing anything — on its own it is
+        # missing whatever the other shape covers.
+        run: uv run pytest tests -q --cov --cov-report= --cov-fail-under=0
+        env:
+          COVERAGE_FILE: .coverage.${{ matrix.install }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ matrix.install }}
+          path: .coverage.${{ matrix.install }}
+          include-hidden-files: true
+          retention-days: 1
       - name: the lexical-only env must genuinely lack the extra
         if: matrix.install == 'lexical-only'
         # Guards the matrix against becoming a no-op again.
@@ -95,6 +106,32 @@ jobs:
           if uv run python -c "import sqlite_vec" 2>/dev/null; then
             echo "semantic extra present in the lexical-only leg"; exit 1
           fi
+
+  # One floor over both install shapes combined. Enforcing per shape would fail
+  # each leg for the paths only the other one reaches, and taking whichever leg
+  # is higher would quietly stop measuring the lexical-only fallbacks.
+  coverage:
+    name: Coverage floor
+    runs-on: ubuntu-24.04
+    needs: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          ignore-nothing-to-cache: true
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+      - run: uv sync
+      - name: Combine both shapes and enforce the floor
+        # The floor itself lives in pyproject under [tool.coverage.report].
+        run: |
+          uv run coverage combine .coverage.lexical-only .coverage.with-semantic
+          uv run coverage report
 
   # Packaging faults are invisible to the test suite, which imports from
   # source: a module missing from the wheel or a broken entry point still
@@ -111,23 +148,12 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
           ignore-nothing-to-cache: true
-      - name: Build
-        run: uv build --out-dir dist
-      - name: Install the wheel into a clean venv and run it
-        run: |
-          uv venv .smoke
-          VIRTUAL_ENV=.smoke uv pip install "$(ls dist/*.whl | head -1)"
-          .smoke/bin/forge-search --help > /dev/null
-          mkdir -p corpus && echo "validate_token" > corpus/a.md
-          .smoke/bin/forge-search search validate_token --root corpus | grep -q a.md
-      - name: A missing --root must fail loudly, not guess
-        # Nothing is discovered, by design — so the failure has to name the
-        # fix rather than quietly indexing the working directory.
-        run: |
-          if .smoke/bin/forge-search serve 2>err.txt; then
-            echo "expected a non-zero exit"; exit 1
-          fi
-          grep -q -- "--root" err.txt
+      - name: Build the wheel, install it clean, and run it
+        # Deliberately `make smoke` rather than an inlined copy. The two used to
+        # diverge: this job passed with `--root corpus` while the Makefile used
+        # `--root .smoke/corpus` and failed on a path bug, so the gate a
+        # contributor runs by hand was broken and CI could not see it.
+        run: make smoke
       - uses: actions/upload-artifact@v7
         with:
           name: dist

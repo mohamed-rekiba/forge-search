@@ -9,5 +9,11 @@ dist/
 wheels/
 *.egg-info
 
+# Coverage data — one file per install shape, plus the combined result
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
 # Virtual environments
 .venv

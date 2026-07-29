@@ -10,7 +10,7 @@ Every knob, what it defaults to, and when to reach for it.
 | `forge-search search <query>` | One-shot search — the fastest way to check behaviour |
 | `forge-search index` | Build or refresh indexes without serving |
 | `forge-search reindex` | Refresh, with an optional "skip if recently done" gate — for hooks and schedulers |
-| `forge-search doctor` | Report index health per root. Exits non-zero only for an index that exists but cannot be read |
+| `forge-search doctor` | Report index health and refresh age per root. Exits non-zero only for an index that exists but cannot be read |
 | `forge-search warm` | Fetch the embedding model (or `--reranker`) |
 | `forge-search bench` | Measure whether the semantic arm earns its cost |
 
@@ -22,6 +22,17 @@ every session start without paying for a tree walk each time.
 stale index counts as healthy — search builds and refreshes on the read path, so
 both fix themselves. Only an index that exists and cannot be read fails, because
 that is the one state that does not self-heal.
+
+Its output also reports each index's refresh age, which is what `--if-stale`
+reads:
+
+```
+  forge-search: 2589 files indexed, fresh, refreshed 4m ago (…/forge-search.db)
+```
+
+`never refreshed` is a separate state from a long-ago refresh, not a very old
+one: an index from before the stamp existed has none, and so does one a schema
+bump emptied. `--if-stale` treats both as due.
 
 ## Roots — always explicit
 
@@ -42,6 +53,10 @@ caches and would leak machine layout.
 directory, because several MCP clients pass it through unexpanded. It is a
 compatibility shim, not a recommendation — see
 [troubleshooting.md](troubleshooting.md#workspacefolder-appears-literally-in-an-error).
+
+Relative paths resolve against the working directory in the ordinary way, hidden
+directories (`.smoke/corpus`) and `..` included. An absolute path is still the
+right answer for anything you commit to a config file.
 
 ## Flags
 
@@ -139,7 +154,10 @@ of per session.
 forge-search serve --transport streamable-http --root /abs/path --semantic
 ```
 
-Both come from the MCP SDK directly; no web framework is involved.
+Both come from the MCP SDK directly; no web framework is involved. **Neither
+needs an extra** — `mcp` requires starlette and uvicorn itself, so a plain
+`uv tool install forge-search` can already serve HTTP. `forge-search[http]`
+still resolves, to nothing, so an existing install line keeps working.
 
 ## Adapters
 

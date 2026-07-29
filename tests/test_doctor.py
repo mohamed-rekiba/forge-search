@@ -22,6 +22,8 @@ import pytest
 
 from forge_search.cli import main
 from forge_search.core.cache import index_path_for
+from forge_search.core.index import LexicalIndex
+from forge_search.core.roots import Root
 
 
 @pytest.fixture(autouse=True)
@@ -293,3 +295,82 @@ class TestReport:
         out = capsys.readouterr().out.lower()
 
         assert "stale" in out
+
+
+class TestRefreshAge:
+    """`--if-stale` turns on a stored timestamp, so doctor has to show it.
+
+    `IndexHealth.last_refreshed_at` had a writer and no reader, and that gap hid
+    a real bug through two review rounds: the stamp survived a schema-version
+    wipe, so `reindex --if-stale` skipped an index it had just emptied and
+    reported it as freshly refreshed. Displaying the value would have made that
+    visible on sight instead of needing a targeted reproduction.
+    """
+
+    def test_shows_how_long_ago_a_refresh_happened(
+        self, root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        main(["reindex", "--root", str(root)])
+        capsys.readouterr()
+
+        assert main(["doctor", "--root", str(root)]) == 0
+        out = capsys.readouterr().out
+
+        assert "refreshed" in out
+        assert "ago" in out, f"expected a relative age, got: {out}"
+
+    def test_an_index_with_no_stamp_says_never_refreshed(
+        self, root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Distinct from "refreshed a long time ago", and a different conclusion.
+
+        Any index built by this version carries a stamp, so the stamp-less case
+        is an index from before the field existed — reproduced here by removing
+        the row. Reading its absence as the epoch, or as now, would make
+        `--if-stale` re-walk forever or skip forever.
+        """
+        main(["index", "--root", str(root)])
+        capsys.readouterr()
+
+        db = index_path_for("proj", root, None)
+        with sqlite3.connect(db) as conn:
+            conn.execute("DELETE FROM meta WHERE key = 'last_refreshed_at'")
+
+        main(["doctor", "--root", str(root)])
+        out = capsys.readouterr().out
+
+        assert "never refreshed" in out, f"expected never-refreshed, got: {out}"
+
+    def test_a_schema_wiped_index_reports_as_never_refreshed(
+        self, root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The case that motivated this.
+
+        A schema bump empties the index, so the stamp describing the emptied rows
+        has to go with them. When it survived, `--if-stale` skipped an index it
+        had just wiped and reported `fresh (0s ago), skipped`.
+
+        The wipe is triggered by opening for write and nothing else — going
+        through `search` or `index` would refresh afterwards and write a new,
+        legitimate stamp, which is what made an earlier version of this test pass
+        against the bug it was supposed to catch.
+        """
+        main(["reindex", "--root", str(root)])
+        capsys.readouterr()
+
+        db = index_path_for("proj", root, None)
+        with sqlite3.connect(db) as conn:
+            conn.execute("UPDATE meta SET value = '1' WHERE key = 'schema_version'")
+
+        # The constructor runs the migration, which drops every row — including
+        # the stamp. No reindex follows, so nothing writes a new one.
+        with LexicalIndex(Root(label="proj", path=root)):
+            pass
+
+        main(["doctor", "--root", str(root)])
+        out = capsys.readouterr().out
+
+        assert "never refreshed" in out, (
+            f"the stamp outlived the rows it describes, so doctor reports a "
+            f"refresh for an emptied index: {out}"
+        )

@@ -14,39 +14,34 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# All three are imported directly in `src/`, so all three get their major
-# bounded for the same reason `mcp` does — see the note on `dependencies`
-# above. The two 0.x pins bound at `<1`: pre-1.0 projects are entitled to
-# break on a minor, but a major is the boundary the resolver can actually be
-# stopped at, and pinning minors here would mean churn on every release.
+# All four are imported directly in `src/`, so all four get their major bounded
+# for the same reason `mcp` does — see the note on `dependencies` above. The two
+# 0.x pins bound at `<1`: pre-1.0 projects are entitled to break on a minor, but
+# a major is the boundary the resolver can actually be stopped at, and pinning
+# minors here would mean churn on every release.
+#
+# `numpy` belongs here, not in `dependencies`: both call sites are function-local
+# imports inside the semantic paths (`OnnxEmbedder.encode`, the cross-encoder's
+# `score`), so a lexical-only install neither has it nor reaches it. It was
+# undeclared until now and arrived only as a transitive of `onnxruntime`, whose
+# own `numpy>=1.21.6` is unbounded — so a third party's requirement chose the
+# major this code ran against.
 semantic = [
+    "numpy>=2.5.1,<3",
     "onnxruntime>=1.28.0,<2",
     "sqlite-vec>=0.1.9,<1",
     "tokenizers>=0.23.1,<1",
 ]
 
-# HTTP transport. Only needed to run as a long-lived shared server instead of
-# a per-session stdio subprocess. See docs/decisions/ on the transport split.
+# Empty on purpose. HTTP transport needs no extra: `mcp` requires starlette and
+# uvicorn unconditionally, so a base install already has everything both the
+# `streamable-http` and `sse` transports use — verified by starting each one in
+# a clean venv with nothing but the wheel. `fastapi` was never used by anything
+# here or in the dependency graph.
 #
-# Deliberately NOT major-bounded, unlike everything above: no forge_search
-# module imports either one, so there is no import path of ours for a major to
-# break. `tests/test_dependency_bounds.py` encodes that distinction rather than
-# applying the bound rule blindly to every line in the manifest.
-#
-# Both entries are questionable on other grounds, though, and the honest state
-# is "not yet decided" rather than a reason:
-#   - `uvicorn` is already an unconditional requirement of `mcp` itself
-#     (`uvicorn>=0.31.1; sys_platform != 'emscripten'`), so declaring it here
-#     is redundant rather than load-bearing.
-#   - `fastapi` appears to be vestigial: the SDK's HTTP transport is built on
-#     **starlette**, which `mcp` also requires directly. Nothing in this
-#     project or its dependency graph is known to need fastapi.
-# Removing either changes what `[http]` promises, so it is a separate decision
-# from this change. Tracked rather than guessed at.
-http = [
-    "fastapi>=0.140.13",
-    "uvicorn>=0.52.0",
-]
+# Kept as a no-op alias rather than deleted so an existing
+# `forge-search[http]` install line keeps resolving. See docs/decisions.md.
+http = []
 
 [dependency-groups]
 dev = [
@@ -58,8 +53,30 @@ dev = [
     "packaging>=25.0",
     "pyright>=1.1.411",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "ruff>=0.16.0",
 ]
+
+[tool.coverage.run]
+source = ["forge_search"]
+branch = true
+# Both install shapes are measured and then combined. Measuring either alone
+# understates the other's paths: the lexical-only leg is the only one that runs
+# the absent-semantic-arm fallbacks, and the semantic leg is the only one that
+# runs the embedder and reranker at all.
+parallel = true
+# Store paths relative to the project root. Without this, combining works only
+# while every leg was recorded at the same absolute path — true for CI today by
+# accident of both jobs checking out to the same place, and the failure when it
+# stops being true reads like a broken checkout rather than a path mismatch.
+relative_files = true
+
+[tool.coverage.report]
+# Set at the floor the suite already clears, and meant to ratchet up. Never down:
+# lowering it to admit a change is the failure this gate exists to catch.
+fail_under = 82
+show_missing = true
+skip_covered = true
 
 [project.scripts]
 forge-search = "forge_search.cli:main"
