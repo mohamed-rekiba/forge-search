@@ -101,6 +101,37 @@ Add to `.mcp.json` in your project, with an **absolute path**:
 Tools appear as `mcp__forge-search__search_code`, `…__search_docs`, and
 `…__reindex`.
 
+For an apexyard fork, point one server at the portfolio instead of a single
+project. `--adapter apexyard` reads the roots from `apexyard.projects.yaml`, and
+`--name` sets the tool prefix:
+
+```json
+{
+  "mcpServers": {
+    "apexyard-search": {
+      "type": "stdio",
+      "command": "forge-search",
+      "args": [
+        "serve", "--root", "/absolute/path/to/your/apexyard/fork", "--semantic",
+        "--name", "apexyard-search", "--adapter", "apexyard"
+      ]
+    }
+  }
+}
+```
+
+The root must be the ops fork itself. The adapter starts there to find the
+registry, whether it sits in the fork or, in split-portfolio mode, in the private
+sibling repo the fork's config points at. Give it as an absolute path: a relative
+one resolves against the client's
+working directory, and when the adapter finds no registry there it falls back to
+treating that directory as a single root — which searches successfully and
+silently omits the rest of the portfolio.
+
+A project registered after the server started does not need a restart. The first
+request naming it re-resolves the root set, and it stays visible for
+search-everything requests after that.
+
 Avoid `${workspaceFolder}` — it is a VS Code `launch.json` variable that MCP
 clients do not agree on. It is accepted as a fallback, but see
 [docs/troubleshooting.md](docs/troubleshooting.md#workspacefolder-appears-literally-in-an-error).

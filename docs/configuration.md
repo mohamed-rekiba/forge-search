@@ -9,8 +9,19 @@ Every knob, what it defaults to, and when to reach for it.
 | `forge-search serve` | Run the MCP server |
 | `forge-search search <query>` | One-shot search — the fastest way to check behaviour |
 | `forge-search index` | Build or refresh indexes without serving |
+| `forge-search reindex` | Refresh, with an optional "skip if recently done" gate — for hooks and schedulers |
+| `forge-search doctor` | Report index health per root. Exits non-zero only for an index that exists but cannot be read |
 | `forge-search warm` | Fetch the embedding model (or `--reranker`) |
 | `forge-search bench` | Measure whether the semantic arm earns its cost |
+
+`index` and `reindex` overlap on purpose. `index` is the plain verb for building
+one; `reindex` adds the staleness gate, so an unattended caller can run it on
+every session start without paying for a tree walk each time.
+
+`doctor`'s exit code is meant as a liveness probe, which is why a missing or
+stale index counts as healthy — search builds and refreshes on the read path, so
+both fix themselves. Only an index that exists and cannot be read fails, because
+that is the one state that does not self-heal.
 
 ## Roots — always explicit
 
@@ -36,9 +47,9 @@ compatibility shim, not a recommendation — see
 
 | Flag | Default | Applies to | What it does |
 |---|---|---|---|
-| `--root <path>` | *required* | all | A tree to index. Repeatable. |
-| `--adapter <name>` | none | serve, index, search, bench | Expand one root into the projects it contains |
-| `--index-dir <path>` | `.forge_search` | serve, index, search, bench | Where indexes live. Relative = per root; absolute = shared |
+| `--root <path>` | *required* | all except warm | A tree to index. Repeatable. |
+| `--adapter <name>` | none | all except warm | Expand one root into the projects it contains |
+| `--index-dir <path>` | `.forge_search` | all except warm | Where indexes live. Relative = per root; absolute = shared |
 | `--semantic` | off | serve, search, bench | Enable the semantic arm (needs the extra + `warm`) |
 | `--model <name>` | `all-minilm` | serve, search, bench, warm | Embedding model short name |
 | `--rerank` | off | serve, search, bench | Cross-encoder final pass (measured worse here) |
@@ -47,7 +58,9 @@ compatibility shim, not a recommendation — see
 | `--quiet` | off | serve | Suppress the startup roots line on stderr |
 | `--top-k <n>` | 10 | search, bench | Maximum results |
 | `--docs` | off | search | Prose files only |
-| `--force` | off | index, warm | Rebuild / re-download from scratch |
+| `--force` | off | index, reindex, warm | Rebuild / re-download from scratch. On `reindex`, also ignores `--if-stale` |
+| `--if-stale <secs>` | off | reindex | Skip when the last refresh was under this long ago. Costs one metadata read, not a tree walk. `0` always refreshes; so does an index with no recorded refresh |
+| `--incremental` | off | reindex | Accepted for explicitness. Refreshing is already incremental, so it changes nothing |
 | `--fixture <file>` | none | bench | File of `query::expected/path` lines |
 
 ## Registering with an MCP client
@@ -68,6 +81,11 @@ Add to `.mcp.json` in your project, with an **absolute path**:
 
 Tools then appear as `mcp__forge-search__search_code`, `…__search_docs`, and
 `…__reindex`.
+
+To serve a whole apexyard portfolio from one server, add `"--adapter",
+"apexyard"` and `"--name", "apexyard-search"` to those args, with the root
+pointing at the fork that holds `apexyard.projects.yaml` — see the
+[README](../README.md#register-with-an-mcp-client) for the full block.
 
 The server name is configurable but should stay `forge-search` unless you have
 a specific reason: registering under another product's name collides with it
