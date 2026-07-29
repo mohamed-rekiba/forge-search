@@ -10,13 +10,18 @@ Every knob, what it defaults to, and when to reach for it.
 | `forge-search search <query>` | One-shot search — the fastest way to check behaviour |
 | `forge-search index` | Build or refresh indexes without serving |
 | `forge-search reindex` | Refresh, with an optional "skip if recently done" gate — for hooks and schedulers |
-| `forge-search doctor` | Report index health per root. Exits non-zero if any index is missing or unreadable |
+| `forge-search doctor` | Report index health per root. Exits non-zero only for an index that exists but cannot be read |
 | `forge-search warm` | Fetch the embedding model (or `--reranker`) |
 | `forge-search bench` | Measure whether the semantic arm earns its cost |
 
 `index` and `reindex` overlap on purpose. `index` is the plain verb for building
 one; `reindex` adds the staleness gate, so an unattended caller can run it on
 every session start without paying for a tree walk each time.
+
+`doctor`'s exit code is meant as a liveness probe, which is why a missing or
+stale index counts as healthy — search builds and refreshes on the read path, so
+both fix themselves. Only an index that exists and cannot be read fails, because
+that is the one state that does not self-heal.
 
 ## Roots — always explicit
 
@@ -78,10 +83,9 @@ Tools then appear as `mcp__forge-search__search_code`, `…__search_docs`, and
 `…__reindex`.
 
 To serve a whole apexyard portfolio from one server, add `"--adapter",
-"apexyard"` and `"--name", "apexyard-search"` to those args — see the
-[README](../README.md#register-with-an-mcp-client) for the full block. Roots come
-from `apexyard.projects.yaml` and are resolved at startup, so a newly registered
-project needs a session restart before it is searchable.
+"apexyard"` and `"--name", "apexyard-search"` to those args, with the root
+pointing at the fork that holds `apexyard.projects.yaml` — see the
+[README](../README.md#register-with-an-mcp-client) for the full block.
 
 The server name is configurable but should stay `forge-search` unless you have
 a specific reason: registering under another product's name collides with it
