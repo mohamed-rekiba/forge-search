@@ -1,7 +1,8 @@
 name: CI
-# Actions float on major tags, so `@v7` already tracks the latest v7 — pinning
-# to `@v7.0.1` would stop patch updates, not add them. SHA pinning is stronger
-# but not adopted here; see #28.
+# Pins follow whatever each action publishes. checkout/artifact/gitleaks ship a
+# floating major (`@v7`), so that tracks patches for free. setup-uv ships only
+# exact versions, so it has to be pinned to one — which is why Dependabot files
+# a PR for each of its releases and none for the others.
 
 on:
   push:
@@ -26,7 +27,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
@@ -41,7 +42,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
@@ -74,7 +75,7 @@ jobs:
             sync: "uv sync --extra semantic"
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
@@ -104,7 +105,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
