@@ -268,6 +268,45 @@ SHA pinning is stronger — the only form a moved tag cannot subvert — but it
 forfeits automatic patches everywhere. Not adopted. Worth revisiting given
 `publish.yml` touches PyPI.
 
+## The release re-locks itself, in the same job
+
+release-please bumps `pyproject.toml` and knows nothing about `uv.lock`, so after
+0.6.0 shipped the lockfile on `main` still named 0.5.0. Small and constant cost:
+the first `uv sync` in a fresh clone rewrote it, so every contributor started
+with a diff they had not made. And a lockfile that disagrees with the released
+tree fails at the one thing a lockfile is for.
+
+`release-please.yml` now re-locks the release PR and pushes to its branch, via
+`scripts/relock-release-pr.sh`.
+
+**It has to be the same job, not its own workflow.** release-please opens that PR
+with the default `GITHUB_TOKEN`, and PRs created by that token do not trigger
+`pull_request` workflows — the same limitation `publish.yml` already documents
+for the release tag. An event-driven re-lock would simply never fire.
+
+**The PR is found by title, not by the action's `pr` output.** Not because that
+output is undocumented — `headBranchName` is declared on the `PullRequest`
+interface the README links. The reason is stronger: `pr` is **unset in exactly
+the case that matters**. release-please returns nothing for a PR whose body it
+left unchanged, and the action filters those out, so both `pr` and `prs_created`
+go empty on a push that updates no release-note content — the adoption case,
+where the PR already exists and only the lock is stale, and the retry case. An
+update that *does* change the body sets both, so this is narrower than "updates
+never report a PR". The step therefore carries no `if:` gate, and finds the PR by
+the title pattern we configure ourselves.
+
+**A release PR has no CI at all.** Not "checks that describe the pre-re-lock
+commit" — zero check runs, because the `GITHUB_TOKEN` that opened it cannot
+trigger `pull_request` workflows. So the lockfile heading for the tag is
+unvalidated by anything downstream, which is why the script runs `uv sync
+--locked` itself and refuses to push a lock that does not satisfy
+`pyproject.toml`. That check is not belt-and-braces; it is the only one there is.
+
+Rejected: adding `uv lock --check` to CI instead. For the same reason — CI never
+runs on a release PR, so a check there cannot see release-time drift. It would
+catch the case where someone hand-edits `pyproject.toml` in an ordinary PR, which
+is a different and much rarer problem.
+
 ---
 
 Next: [architecture.md](architecture.md) · [BENCHMARK.md](../BENCHMARK.md)
