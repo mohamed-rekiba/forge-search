@@ -59,7 +59,7 @@ compatibility shim, not a recommendation — see
 | `--top-k <n>` | 10 | search, bench | Maximum results |
 | `--docs` | off | search | Prose files only |
 | `--force` | off | index, reindex, warm | Rebuild / re-download from scratch. On `reindex`, also ignores `--if-stale` |
-| `--if-stale <secs>` | off | reindex | Skip when the last refresh was under this long ago. Costs one metadata read, not a tree walk |
+| `--if-stale <secs>` | off | reindex | Skip when the last refresh was under this long ago. Costs one metadata read, not a tree walk. `0` always refreshes; so does an index with no recorded refresh |
 | `--incremental` | off | reindex | Accepted for explicitness. Refreshing is already incremental, so it changes nothing |
 | `--fixture <file>` | none | bench | File of `query::expected/path` lines |
 

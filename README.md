@@ -120,8 +120,10 @@ project. `--adapter apexyard` reads the roots from `apexyard.projects.yaml`, and
 }
 ```
 
-The root must be the fork itself, since that is where `apexyard.projects.yaml`
-lives. Give it as an absolute path: a relative one resolves against the client's
+The root must be the ops fork itself. The adapter starts there to find the
+registry, whether it sits in the fork or, in split-portfolio mode, in the private
+sibling repo the fork's config points at. Give it as an absolute path: a relative
+one resolves against the client's
 working directory, and when the adapter finds no registry there it falls back to
 treating that directory as a single root — which searches successfully and
 silently omits the rest of the portfolio.
