@@ -1,16 +1,7 @@
 name: CI
-#
-# On action pinning, because the versions here look inconsistent and are not.
-# Most actions are pinned to a floating MAJOR tag (`@v7`, `@v8`, `@v3`), which
-# adopts minor and patch releases automatically — so `@v7` already *is* the
-# latest v7 and repinning it to `@v7.0.1` would opt out of that, not update it.
-# `setup-uv` used to be the lone patch-pinned exception, which is why Dependabot
-# filed a PR for every one of its patches; it now floats like the rest.
-#
-# The stronger posture is SHA pinning, which trades automatic patch adoption for
-# supply-chain immutability. That is a real decision with a real cost and has
-# not been taken here — see the tracking issue rather than assuming this file
-# simply drifted.
+# Actions float on major tags, so `@v7` already tracks the latest v7 — pinning
+# to `@v7.0.1` would stop patch updates, not add them. SHA pinning is stronger
+# but not adopted here; see #28.
 
 on:
   push:
