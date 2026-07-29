@@ -77,6 +77,17 @@ def test_other_unexpanded_variables_are_still_rejected(tmp_path, monkeypatch):
     assert "unexpanded variable" in str(exc.value)
 
 
+def test_workspace_folder_with_a_suffix_is_not_the_shim(tmp_path, monkeypatch):
+    # The only case the boundary check still decides, now that "." is off the
+    # shim's list — and so the only thing keeping that check from looking
+    # redundant to whoever reads it next. A bare prefix match would splice cwd
+    # onto "suffix" with no separator, the same way `.smoke/corpus` used to break.
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        main(["index", "--root", "${workspaceFolder}suffix"])
+    assert "unexpanded variable" in str(exc.value)
+
+
 def test_bare_dot_still_means_the_working_directory(tmp_path, monkeypatch):
     # `.` used to be handled by the cwd shim. It is an ordinary relative path
     # now, and this pins that the change did not alter what it resolves to.
