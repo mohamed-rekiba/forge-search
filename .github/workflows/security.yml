@@ -11,6 +11,14 @@ on:
 
 permissions:
   contents: read
+  # gitleaks-action lists a pull request's commits to scan them, which needs
+  # `pull-requests: read`. Without it the action gets 403 "Resource not
+  # accessible by integration" and crashes *before scanning anything* — so the
+  # job reported failure on every pull request while never once looking for a
+  # secret. It passed only on the scheduled main runs, where there is no PR to
+  # enumerate, which is what made the gap look like a flaky check rather than a
+  # gate that had never run on the surface it exists to guard.
+  pull-requests: read
 
 concurrency:
   group: security-${{ github.ref }}

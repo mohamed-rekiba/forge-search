@@ -15,7 +15,7 @@ import pytest
 
 from forge_search.core.query import QueryError
 from forge_search.core.roots import Root
-from forge_search.core.server import MAX_TOP_K, ForgeSearch
+from forge_search.core.server import LOG_LEVELS, MAX_TOP_K, ForgeSearch
 
 
 @pytest.fixture(autouse=True)
@@ -64,10 +64,12 @@ class TestToolRegistration:
         fs = ForgeSearch(roots=[Root(label="r", path=tmp_path)])
         tools = {t.name: t for t in asyncio.run(fs.build().list_tools())}
 
-        assert tools["search_code"].inputSchema["required"] == ["query"]
+        # mcp 2.x renamed the model fields to snake_case (`inputSchema` →
+        # `input_schema`); the JSON wire keys are unchanged.
+        assert tools["search_code"].input_schema["required"] == ["query"]
         assert (
-            "required" not in tools["reindex"].inputSchema
-            or not tools["reindex"].inputSchema["required"]
+            "required" not in tools["reindex"].input_schema
+            or not tools["reindex"].input_schema["required"]
         )
         fs.close()
 
@@ -175,8 +177,12 @@ class TestReindexTool:
     def test_reindex_reports_per_root(self, search: ForgeSearch) -> None:
         mcp = search.build()
         result = asyncio.run(mcp.call_tool("reindex", {}))
-        payload = result[1] if isinstance(result, tuple) else result
+        # mcp 2.x returns a `CallToolResult` rather than a
+        # (content, structured) tuple; the dict a tool returns arrives on
+        # `.structured_content`.
+        payload = result.structured_content
 
+        assert payload is not None
         assert set(payload["roots"]) == {"alpha", "beta"}
 
     def test_reindex_unknown_project_raises(self, search: ForgeSearch) -> None:
@@ -187,7 +193,7 @@ class TestReindexTool:
         including the wrong one. The message is the part that makes the error
         actionable, so that is what gets checked.
         """
-        from mcp.server.fastmcp.exceptions import ToolError
+        from mcp.server.mcpserver.exceptions import ToolError
 
         mcp = search.build()
         with pytest.raises(ToolError, match="unknown project"):
@@ -286,3 +292,103 @@ class TestDynamicRootDiscovery:
                 fs._search("x", project="beta", top_k=10, doc_only=False)
         finally:
             fs.close()
+
+
+class TestLogLevelHandling:
+    """Every level the SDK accepts must be orderable.
+
+    `_announce` compares the client's requested level against `info` by tuple
+    position. A level the tuple omits raises `ValueError` from `.index()` — and
+    that call sits *above* the `self._announced = True` assignment, so the flag
+    is never set and the failure repeats on every subsequent request. One
+    missing string turns into a permanently broken server, and the client sees
+    it as the tool failing rather than as a logging problem.
+    """
+
+    def test_log_levels_cover_every_sdk_level(self) -> None:
+        """Drift guard: the SDK owns this vocabulary, so ours must match it.
+
+        Asserted as a set because the tuple's *order* is ours to choose
+        (ascending severity, which the comparison depends on) while its
+        *membership* is the SDK's to define.
+        """
+        from typing import get_args
+
+        from mcp import types
+
+        assert set(LOG_LEVELS) == set(get_args(types.LoggingLevel)), (
+            "LOG_LEVELS has drifted from mcp's LoggingLevel. A level the SDK "
+            "accepts but this tuple omits makes _announce raise ValueError on "
+            "every request, permanently."
+        )
+
+    def test_log_levels_are_in_ascending_severity(self) -> None:
+        """The tuple's ORDER is load-bearing, not decorative.
+
+        `_announce` decides whether to emit by comparing tuple positions, so a
+        mis-ordered tuple silently inverts the filter — a client asking for
+        `emergency` would start receiving `info` notifications. Set-equality
+        above deliberately cannot catch that: sorting the tuple alphabetically
+        satisfies it while breaking the comparison entirely.
+        """
+        assert LOG_LEVELS == (
+            "debug",
+            "info",
+            "notice",
+            "warning",
+            "error",
+            "critical",
+            "alert",
+            "emergency",
+        ), (
+            "LOG_LEVELS must stay in ascending severity — _announce compares "
+            "positions, so reordering changes which notifications are sent."
+        )
+
+    @pytest.mark.parametrize(
+        "level,expect_message",
+        [
+            ("debug", True),  # below info — the summary still qualifies
+            ("info", True),  # equal to info — emitted
+            ("warning", False),  # above info — suppressed
+            ("alert", False),
+            ("emergency", False),  # the level that used to crash outright
+        ],
+    )
+    def test_announce_respects_the_requested_level(
+        self, search: ForgeSearch, level: str, expect_message: bool
+    ) -> None:
+        """Every valid level is orderable AND filters correctly.
+
+        Asserting on the emitted messages is what makes this a real test of the
+        ordering. Without it an alphabetically-sorted LOG_LEVELS passes, which
+        is exactly how the order went unverified the first time.
+        """
+
+        class _Ctx:
+            def __init__(self) -> None:
+                self.messages: list[str] = []
+
+            async def info(self, message: str) -> None:
+                self.messages.append(message)
+
+        search.summary = "probe"
+        search._announced = False
+        search._min_log_level = level
+
+        ctx = _Ctx()
+        asyncio.run(search._announce(ctx))  # type: ignore[arg-type]
+
+        assert bool(ctx.messages) is expect_message, (
+            f"level {level!r}: expected "
+            f"{'a notification' if expect_message else 'silence'}, got "
+            f"{len(ctx.messages)} message(s)"
+        )
+        # The flag must be set either way — it is what stops a second attempt,
+        # and leaving it unset is how the emergency crash became permanent.
+        assert search._announced is True
+
+        # A second call must not re-emit, whatever the level.
+        before = len(ctx.messages)
+        asyncio.run(search._announce(ctx))  # type: ignore[arg-type]
+        assert len(ctx.messages) == before, "the summary was announced twice"
