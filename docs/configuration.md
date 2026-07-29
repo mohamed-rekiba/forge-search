@@ -54,9 +54,9 @@ directory, because several MCP clients pass it through unexpanded. It is a
 compatibility shim, not a recommendation — see
 [troubleshooting.md](troubleshooting.md#workspacefolder-appears-literally-in-an-error).
 
-`.` gets the same treatment, and only when it is the whole path or a `./` prefix.
-A hidden directory like `.smoke/corpus` is an ordinary relative path and resolves
-against the working directory as one, as does `..`.
+Relative paths resolve against the working directory in the ordinary way, hidden
+directories (`.smoke/corpus`) and `..` included. An absolute path is still the
+right answer for anything you commit to a config file.
 
 ## Flags
 

@@ -22,6 +22,8 @@ import pytest
 
 from forge_search.cli import main
 from forge_search.core.cache import index_path_for
+from forge_search.core.index import LexicalIndex
+from forge_search.core.roots import Root
 
 
 @pytest.fixture(autouse=True)
@@ -339,14 +341,19 @@ class TestRefreshAge:
 
         assert "never refreshed" in out, f"expected never-refreshed, got: {out}"
 
-    def test_a_schema_wiped_index_does_not_claim_a_fresh_refresh(
+    def test_a_schema_wiped_index_reports_as_never_refreshed(
         self, root: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """The case that motivated this.
 
         A schema bump empties the index, so the stamp describing the emptied rows
         has to go with them. When it survived, `--if-stale` skipped an index it
-        had just wiped and called it fresh.
+        had just wiped and reported `fresh (0s ago), skipped`.
+
+        The wipe is triggered by opening for write and nothing else — going
+        through `search` or `index` would refresh afterwards and write a new,
+        legitimate stamp, which is what made an earlier version of this test pass
+        against the bug it was supposed to catch.
         """
         main(["reindex", "--root", str(root)])
         capsys.readouterr()
@@ -355,18 +362,15 @@ class TestRefreshAge:
         with sqlite3.connect(db) as conn:
             conn.execute("UPDATE meta SET value = '1' WHERE key = 'schema_version'")
 
-        # Opening for write runs the migration, which drops every row.
-        main(["search", "validate_token", "--root", str(root)])
-        capsys.readouterr()
-        with sqlite3.connect(db) as conn:
-            stamp = conn.execute(
-                "SELECT value FROM meta WHERE key = 'last_refreshed_at'"
-            ).fetchone()
+        # The constructor runs the migration, which drops every row — including
+        # the stamp. No reindex follows, so nothing writes a new one.
+        with LexicalIndex(Root(label="proj", path=root)):
+            pass
 
-        # A search rebuilds on the read path, so a stamp here is legitimate —
-        # what must not survive is the *pre-wipe* one describing dropped rows.
         main(["doctor", "--root", str(root)])
         out = capsys.readouterr().out
 
-        assert "files indexed" in out
-        assert stamp is None or float(stamp[0]) > 0
+        assert "never refreshed" in out, (
+            f"the stamp outlived the rows it describes, so doctor reports a "
+            f"refresh for an emptied index: {out}"
+        )

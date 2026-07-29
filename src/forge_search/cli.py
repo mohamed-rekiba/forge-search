@@ -47,7 +47,13 @@ __all__ = ["main"]
 _LAST_RESOLUTION: Resolution | None = None
 
 #: The VS Code variable clients disagree about. Tolerated, never recommended.
-_CURRENT_WORKSPACE = ["${workspaceFolder}", "."]
+#:
+#: `.` used to be listed here too, and it never did anything: for every path the
+#: shim matched, splicing cwd on produced the same result `Path.resolve()` gives
+#: anyway. What it did do was match `.smoke/corpus` and `..` on a bare prefix and
+#: mangle both. Deleting the entry is the whole fix; ordinary relative paths were
+#: already handled correctly one line below.
+_CURRENT_WORKSPACE = ["${workspaceFolder}"]
 
 #: `${VAR}` or `$VAR` left in a path — a client that did not substitute it.
 _UNEXPANDED = re.compile(r"\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*")
@@ -73,15 +79,19 @@ def _providers() -> list[RootProvider]:
 def _names_the_workspace(path_str: str, prefix: str) -> bool:
     """Whether a root path is the cwd shim rather than a path that starts alike.
 
-    The prefix has to end at a path boundary. A bare `startswith` made `.` match
-    `.smoke/corpus`, which then had cwd spliced onto `smoke/corpus` with no
-    separator — reporting a path the caller never typed, and breaking `make
-    smoke`, whose root is exactly that. `..` was mangled the same way.
+    The prefix has to end at a path boundary, so `${workspaceFolder}` and
+    `${workspaceFolder}/sub` match while `${workspaceFolder}suffix` does not —
+    that last one is a different path, and treating it as the shim would splice
+    cwd onto `suffix` with no separator. Which is precisely what the old bare
+    `startswith` did to `.smoke/corpus` back when `.` was on the list.
     """
     if path_str == prefix:
         return True
-    rest = path_str[len(prefix) :]
-    return path_str.startswith(prefix) and rest[:1] in ("/", os.sep)
+    if not path_str.startswith(prefix):
+        return False
+    # os.sep and os.altsep rather than a literal "/": a client on Windows may
+    # hand back either separator.
+    return path_str[len(prefix)] in (os.sep, os.altsep or os.sep)
 
 
 def _explicit_roots(args: argparse.Namespace) -> list[Root]:

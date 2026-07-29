@@ -78,7 +78,8 @@ def test_other_unexpanded_variables_are_still_rejected(tmp_path, monkeypatch):
 
 
 def test_bare_dot_still_means_the_working_directory(tmp_path, monkeypatch):
-    # The other half of the cwd shim, and the half that must keep working.
+    # `.` used to be handled by the cwd shim. It is an ordinary relative path
+    # now, and this pins that the change did not alter what it resolves to.
     monkeypatch.chdir(tmp_path)
     (tmp_path / "f.md").write_text("hello\n")
     assert main(["index", "--root", "."]) == 0
@@ -94,10 +95,10 @@ def test_dot_slash_prefix_resolves_under_the_working_directory(tmp_path, monkeyp
 def test_a_dot_prefixed_directory_name_is_not_treated_as_the_cwd_shim(
     tmp_path, monkeypatch
 ):
-    # `.smoke/corpus` is not the cwd shim, it is a hidden directory. Matching
-    # the shim's "." on a bare prefix spliced cwd onto the remainder with no
-    # separator — `/work` + `smoke/corpus` — and reported a path the caller
-    # never typed. This is what broke `make smoke`, whose root is `.smoke/corpus`.
+    # `.smoke/corpus` is a hidden directory, not the cwd shim. While `.` was on
+    # the shim's list a bare prefix match spliced cwd onto the remainder with no
+    # separator — `/work` + `smoke/corpus` — and reported a path the caller never
+    # typed. This is what broke `make smoke`, whose root is `.smoke/corpus`.
     monkeypatch.chdir(tmp_path)
     hidden = tmp_path / ".smoke" / "corpus"
     hidden.mkdir(parents=True)

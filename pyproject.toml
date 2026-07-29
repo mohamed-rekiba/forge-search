@@ -65,6 +65,11 @@ branch = true
 # the absent-semantic-arm fallbacks, and the semantic leg is the only one that
 # runs the embedder and reranker at all.
 parallel = true
+# Store paths relative to the project root. Without this, combining works only
+# while every leg was recorded at the same absolute path — true for CI today by
+# accident of both jobs checking out to the same place, and the failure when it
+# stops being true reads like a broken checkout rather than a path mismatch.
+relative_files = true
 
 [tool.coverage.report]
 # Set at the floor the suite already clears, and meant to ratchet up. Never down:
