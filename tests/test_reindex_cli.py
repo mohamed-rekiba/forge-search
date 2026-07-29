@@ -13,6 +13,7 @@ answers from one row of metadata.
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from pathlib import Path
 
@@ -151,6 +152,58 @@ class TestIfStaleGate:
         with LexicalIndex(Root(label="proj", path=root)) as index:
             assert index.indexed_count() == 2, (
                 "an unstamped index was skipped, so it could never be refreshed"
+            )
+
+    def test_schema_wipe_clears_the_stamp_so_the_gate_does_not_skip(
+        self, root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The stamp must not outlive the rows it describes.
+
+        `_migrate_if_stale` empties the index on a SCHEMA_VERSION mismatch. If
+        the stamp survives that, the gate sees a recent refresh and skips — so on
+        the first run after any schema bump the hook reports
+        `fresh (0s ago), skipped` about an index it has just emptied, and the
+        rebuild never happens. That is the exact hazard SCHEMA_VERSION's own
+        comment warns about for the schema stamp; this stamp must not
+        reintroduce it.
+        """
+        main(["reindex", "--root", str(root)])
+        db = index_path_for("proj", root, None)
+        with sqlite3.connect(db) as conn:
+            conn.execute("UPDATE meta SET value = '1' WHERE key = 'schema_version'")
+        capsys.readouterr()
+
+        # Opening it is what triggers the wipe, exactly as the hook's run would.
+        main(["reindex", "--root", str(root), "--if-stale", "86400"])
+        out = capsys.readouterr().out.lower()
+
+        with LexicalIndex(Root(label="proj", path=root)) as index:
+            count = index.indexed_count()
+
+        assert "skipped" not in out, (
+            "the gate skipped an index that the schema check had just emptied — "
+            f"output was {out.strip()!r}"
+        )
+        assert count > 0, (
+            "the index was left empty: the wipe cleared the rows but the stamp "
+            "survived, so the gate declined to rebuild"
+        )
+
+    def test_force_overrides_the_window(self, root: Path) -> None:
+        """`--force` means rebuild, so it must not be silently swallowed.
+
+        Everywhere else `force` bypasses a cheap-skip path. Honouring the time
+        gate ahead of it would make `reindex --force --if-stale N` a no-op inside
+        the window, with nothing said about it.
+        """
+        main(["reindex", "--root", str(root)])
+        (root / "src" / "new.py").write_text("def added():\n    pass\n")
+
+        main(["reindex", "--root", str(root), "--force", "--if-stale", "86400"])
+
+        with LexicalIndex(Root(label="proj", path=root)) as index:
+            assert index.indexed_count() == 2, (
+                "--force was ignored because the time window had not elapsed"
             )
 
     def test_no_index_at_all_is_treated_as_due(self, root: Path) -> None:

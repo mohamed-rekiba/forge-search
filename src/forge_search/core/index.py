@@ -252,6 +252,12 @@ class LexicalIndex:
             self._conn.execute("DELETE FROM chunks")
             self._conn.execute("DELETE FROM paths")
             self._conn.execute("DELETE FROM files")
+            # The refresh stamp describes rows that no longer exist, so it goes
+            # with them. Leaving it behind is the same hazard this guard exists
+            # to prevent, one stamp over: a time-based caller reads "refreshed
+            # seconds ago", skips, and the rebuild never happens — so the first
+            # run after a version bump reports a fresh index that is empty.
+            self._conn.execute("DELETE FROM meta WHERE key = 'last_refreshed_at'")
             self._conn.execute(
                 "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
