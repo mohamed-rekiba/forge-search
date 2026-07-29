@@ -19,6 +19,7 @@ import argparse
 import re
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 from .core.bench import BenchQuery, run_bench
@@ -349,6 +350,48 @@ def _cmd_index(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_reindex(args: argparse.Namespace) -> int:
+    """Refresh indexes, optionally only if the last refresh is old enough.
+
+    Same work as `index`; the difference is `--if-stale`, which makes the
+    command cheap to call unconditionally from a session-start hook.
+
+    Note which staleness this gate reads. `reindex()` already detects *content*
+    staleness, but only by walking the whole tree — so it cannot answer "is this
+    worth doing?" without doing most of it. `--if-stale` reads one metadata row
+    instead. The trade is explicit: inside the window, a genuinely changed tree
+    is skipped. That is safe here because search repairs content staleness on
+    the read path anyway; this command exists to keep indexes warm, not to be
+    the thing correctness depends on.
+    """
+    index_dir = _index_dir(args)
+    window = getattr(args, "if_stale", None)
+    now = time.time()
+
+    for root in _resolve_roots(args):
+        with LexicalIndex(root, index_dir=index_dir) as index:
+            if window is not None:
+                last = index.last_refreshed_at()
+                # A missing stamp means due, never "skip forever" — an index
+                # predating the stamp must still get refreshed.
+                if last is not None and (now - last) < window:
+                    age = int(now - last)
+                    print(f"{root.label}: fresh ({age}s ago), skipped")
+                    continue
+
+            stats = index.reindex(force=args.force)
+            state = (
+                "up to date"
+                if stats.up_to_date
+                else (
+                    f"{stats.files_indexed} indexed, {stats.files_removed} removed, "
+                    f"{stats.chunks_written} lines"
+                )
+            )
+            print(f"{root.label}: {state}")
+    return 0
+
+
 def _semantic_status() -> str:
     """Whether the semantic arm could run, without making it run.
 
@@ -535,6 +578,35 @@ def main(argv: list[str] | None = None) -> int:
     index.add_argument("--force", action="store_true", help="Rebuild from scratch")
     index.set_defaults(func=_cmd_index)
 
+    # `reindex` and `index` do the same work. `index` is the plain verb for
+    # building one; `reindex` adds --if-stale so a scheduler or session hook can
+    # call it on every run without paying for it. Neither is deprecated.
+    reindex = sub.add_parser(
+        "reindex",
+        help="Refresh indexes, optionally only when the last refresh is old",
+    )
+    _add_root_args(reindex)
+    reindex.add_argument("--force", action="store_true", help="Rebuild from scratch")
+    reindex.add_argument(
+        "--incremental",
+        action="store_true",
+        help=(
+            "Accepted for explicitness; refreshing is already incremental, so "
+            "this changes nothing."
+        ),
+    )
+    reindex.add_argument(
+        "--if-stale",
+        type=float,
+        metavar="SECONDS",
+        help=(
+            "Skip entirely when the last refresh was under SECONDS ago. Reads "
+            "one metadata row rather than walking the tree, which is what makes "
+            "an unconditional call cheap. 0 means always refresh."
+        ),
+    )
+    reindex.set_defaults(func=_cmd_reindex)
+
     doctor = sub.add_parser(
         "doctor",
         help="Report index health. Exits 0 when the install can serve queries.",
@@ -560,7 +632,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # doctor included deliberately: without it, doctor resolves the default
     # index location and reports a correctly-indexed root as unindexed.
-    for _p in (serve, index, doctor, search):
+    for _p in (serve, index, reindex, doctor, search):
         _index_dir_flag(_p)
 
     warm = sub.add_parser("warm", help="Fetch the embedding model (semantic arm)")

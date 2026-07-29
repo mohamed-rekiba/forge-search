@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -293,6 +294,45 @@ class LexicalIndex:
         """
         return self._current_files() != self._indexed_files()
 
+    def last_refreshed_at(self) -> float | None:
+        """When `reindex` last ran, as a unix timestamp. None if never.
+
+        Read from one metadata row, which is the point: `is_stale` has to walk
+        the whole tree to answer, so it cannot serve as a "should I bother?"
+        check. This can.
+
+        None means the question has no answer yet — an index built before this
+        was recorded, or one never reindexed. Callers should read that as *due*
+        rather than substituting a default, since the alternative (treating a
+        missing stamp as the epoch, or as now) either re-walks forever or skips
+        forever.
+        """
+        row = self._conn.execute(
+            "SELECT value FROM meta WHERE key = 'last_refreshed_at'"
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            return float(row[0])
+        except TypeError, ValueError:
+            # A corrupt stamp is not worth crashing over, and it is honest to
+            # report "no usable answer" — the caller then treats it as due.
+            return None
+
+    def _stamp_refresh(self) -> None:
+        """Record that the index was brought in line with disk just now."""
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('last_refreshed_at', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (str(time.time()),),
+            )
+
+    def clear_refresh_stamp(self) -> None:
+        """Drop the stamp. Exists so tests can reproduce a pre-stamp index."""
+        with self._conn:
+            self._conn.execute("DELETE FROM meta WHERE key = 'last_refreshed_at'")
+
     def indexed_count(self) -> int:
         """How many files this index currently holds."""
         return self._conn.execute("SELECT count(*) FROM files").fetchone()[0]
@@ -328,6 +368,11 @@ class LexicalIndex:
         indexed = {} if force else self._indexed_files()
 
         if not force and on_disk == indexed:
+            # Stamp even though nothing changed: the stamp means "verified
+            # current at this time", which is what a time-based gate needs. Only
+            # stamping real work would leave a repeatedly-current index without
+            # a fresh stamp, so every call would re-walk the tree.
+            self._stamp_refresh()
             return IndexStats(0, 0, 0, up_to_date=True)
 
         changed = [rel for rel, meta in on_disk.items() if indexed.get(rel) != meta]
@@ -359,6 +404,7 @@ class LexicalIndex:
                     (rel, size, mtime_ns),
                 )
 
+        self._stamp_refresh()
         return IndexStats(len(changed), len(removed), chunks_written, up_to_date=False)
 
     def _index_file(self, rel: str) -> int:
