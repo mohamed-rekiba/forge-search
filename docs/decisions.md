@@ -268,6 +268,38 @@ SHA pinning is stronger — the only form a moved tag cannot subvert — but it
 forfeits automatic patches everywhere. Not adopted. Worth revisiting given
 `publish.yml` touches PyPI.
 
+## The release re-locks itself, in the same job
+
+release-please bumps `pyproject.toml` and knows nothing about `uv.lock`, so after
+0.6.0 shipped the lockfile on `main` still named 0.5.0. Small and constant cost:
+the first `uv sync` in a fresh clone rewrote it, so every contributor started
+with a diff they had not made. And a lockfile that disagrees with the released
+tree fails at the one thing a lockfile is for.
+
+`release-please.yml` now re-locks the release PR and pushes to its branch, via
+`scripts/relock-release-pr.sh`.
+
+**It has to be the same job, not its own workflow.** release-please opens that PR
+with the default `GITHUB_TOKEN`, and PRs created by that token do not trigger
+`pull_request` workflows — the same limitation `publish.yml` already documents
+for the release tag. An event-driven re-lock would simply never fire.
+
+**The PR is found by title, not by branch name.** The title pattern is ours, set
+in `release-please-config.json`; the `release-please--branches--…` branch name is
+release-please's internal convention. The action's `pr` output would be the
+obvious third option, but its branch field is undocumented — and the last thing
+this repo pinned on an undocumented assumption about an action was
+`setup-uv@v9`, which broke CI on the spot.
+
+**Accepted cost:** a `GITHUB_TOKEN` push does not re-run the PR's checks, so the
+release PR's green ticks describe the commit before the re-lock. Tolerable for a
+lockfile-only change, and the reason the re-lock is its own commit with its own
+message rather than folded into the release commit.
+
+Rejected: adding `uv lock --check` to CI instead. It would catch the drift
+without fixing it, and on a release PR it would fail a check that nothing can
+re-run — leaving every release blocked on a manual local `uv lock`.
+
 ---
 
 Next: [architecture.md](architecture.md) · [BENCHMARK.md](../BENCHMARK.md)
