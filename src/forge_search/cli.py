@@ -20,6 +20,7 @@ query ran against real content.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sqlite3
 import sys
@@ -69,6 +70,20 @@ def _providers() -> list[RootProvider]:
     return found
 
 
+def _names_the_workspace(path_str: str, prefix: str) -> bool:
+    """Whether a root path is the cwd shim rather than a path that starts alike.
+
+    The prefix has to end at a path boundary. A bare `startswith` made `.` match
+    `.smoke/corpus`, which then had cwd spliced onto `smoke/corpus` with no
+    separator — reporting a path the caller never typed, and breaking `make
+    smoke`, whose root is exactly that. `..` was mangled the same way.
+    """
+    if path_str == prefix:
+        return True
+    rest = path_str[len(prefix) :]
+    return path_str.startswith(prefix) and rest[:1] in ("/", os.sep)
+
+
 def _explicit_roots(args: argparse.Namespace) -> list[Root]:
     """The roots the caller named, before any adapter expansion.
 
@@ -96,7 +111,7 @@ def _explicit_roots(args: argparse.Namespace) -> list[Root]:
         if not path_str:
             path_str, label = label, ""
         for _prefix in _CURRENT_WORKSPACE:
-            if path_str.startswith(_prefix):
+            if _names_the_workspace(path_str, _prefix):
                 # Compatibility shim for `--root ${workspaceFolder}`, which several
                 # MCP clients pass through unexpanded (see README's per-client
                 # table). Falls back to the working directory, which for a stdio
@@ -424,6 +439,27 @@ def _semantic_status() -> str:
     return "available"
 
 
+def _refresh_note(stamp: float | None) -> str:
+    """What `--if-stale` will be looking at, in a form worth reading.
+
+    Absent is its own answer, not a very old timestamp: an index built before
+    the stamp existed has none, and so does one whose rows a schema bump wiped.
+    `--if-stale` treats both as due, and reading them as "refreshed long ago"
+    would suggest the opposite.
+    """
+    if stamp is None:
+        return "never refreshed"
+
+    seconds = max(0, int(time.time() - stamp))
+    if seconds < 60:
+        return f"refreshed {seconds}s ago"
+    if seconds < 3600:
+        return f"refreshed {seconds // 60}m ago"
+    if seconds < 86400:
+        return f"refreshed {seconds // 3600}h ago"
+    return f"refreshed {seconds // 86400}d ago"
+
+
 def _cmd_doctor(args: argparse.Namespace) -> int:
     """Report health without changing any of it.
 
@@ -473,6 +509,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             continue
 
         notes = ["stale" if health.stale else "fresh"]
+        notes.append(_refresh_note(health.last_refreshed_at))
         if not health.schema_current:
             # Not a fault either: the next index/search rebuilds it. Worth
             # saying, because it explains a rebuild the operator did not ask for.
@@ -487,8 +524,12 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def _cmd_search(args: argparse.Namespace) -> int:
+    # Roots before `_index_dir`, so the adapter tier of that lookup can see the
+    # resolution — same ordering `doctor` needs, for the same reason.
     roots = _resolve_roots(args)
-    search = ForgeSearch(roots=roots, embedder=_embedder(args))
+    search = ForgeSearch(
+        roots=roots, embedder=_embedder(args), index_dir=_index_dir(args)
+    )
     try:
         result = search._search(
             args.query, project=args.project, top_k=args.top_k, doc_only=args.docs

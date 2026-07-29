@@ -62,6 +62,23 @@ test-lexical:  ## Suite in a genuinely minimal env (no semantic extra)
 test-semantic:  ## Suite with the semantic extra
 	uv run --extra semantic pytest tests -q
 
+# Coverage has to span both shapes and be combined, not measured in one of them.
+# Either leg alone understates the other: only the lexical-only run reaches the
+# absent-semantic-arm fallbacks, and only the semantic run reaches the embedder
+# and reranker. The floor lives in pyproject under [tool.coverage.report].
+.PHONY: coverage
+coverage:  ## Combined coverage across both install shapes, floor enforced
+	rm -f .coverage .coverage.lexical .coverage.semantic
+	COVERAGE_FILE=.coverage.lexical UV_PROJECT_ENVIRONMENT=.venv-lexical uv sync --quiet
+	@# --cov-fail-under=0 on the legs: the floor applies to the combined total,
+	@# and pytest-cov would otherwise fail each leg for missing the other's paths.
+	COVERAGE_FILE=.coverage.lexical UV_PROJECT_ENVIRONMENT=.venv-lexical \
+		uv run pytest tests -q --cov --cov-report= --cov-fail-under=0
+	COVERAGE_FILE=.coverage.semantic uv run --extra semantic \
+		pytest tests -q --cov --cov-report= --cov-fail-under=0
+	uv run coverage combine .coverage.lexical .coverage.semantic
+	uv run coverage report
+
 .PHONY: bench
 bench:  ## Answer-recall benchmark; ROOT=<abs path to a corpus>
 	@test -n "$(ROOT)" || { echo "usage: make bench ROOT=/abs/path/to/corpus"; exit 2; }
@@ -75,6 +92,10 @@ security:  ## bandit + pip-audit, via uvx so neither is carried as a dev dep
 
 .PHONY: build
 build:  ## Build sdist + wheel
+	@# Clear dist first: it is not versioned away, so old wheels accumulate and
+	@# anything selecting one by glob would install whichever sorts first —
+	@# 0.4.2 rather than 0.5.0. `smoke` used to do exactly that.
+	rm -rf dist
 	uv build --out-dir dist
 
 .PHONY: smoke
@@ -82,11 +103,20 @@ smoke: build  ## Install the built wheel into a clean venv and actually run it
 	@# Catches packaging faults no test can see: a module missing from the
 	@# wheel, a broken entry point, an import that only resolves from source.
 	rm -rf .smoke && uv venv .smoke --quiet
-	VIRTUAL_ENV=.smoke uv pip install --quiet "$$(ls dist/*.whl | head -1)"
+	@# Unquoted glob on purpose: `build` leaves exactly one wheel, so this
+	@# resolves to it. If it ever resolves to two, uv fails loudly instead of
+	@# installing whichever one sorted first.
+	VIRTUAL_ENV=.smoke uv pip install --quiet dist/*.whl
 	.smoke/bin/forge-search --help > /dev/null
 	@mkdir -p .smoke/corpus && echo "validate_token" > .smoke/corpus/a.md
 	.smoke/bin/forge-search search validate_token --root .smoke/corpus | grep -q a.md
-	@echo "smoke: wheel installs, CLI runs, search returns a hit"
+	@# Nothing is discovered, by design, so a missing --root has to name the fix
+	@# rather than quietly index the working directory.
+	@if .smoke/bin/forge-search serve 2>.smoke/err.txt; then \
+		echo "expected a non-zero exit when --root is missing"; exit 1; \
+	fi
+	@grep -q -- "--root" .smoke/err.txt
+	@echo "smoke: wheel installs, CLI runs, search hits, missing --root fails loudly"
 	@rm -rf .smoke
 
 pre-commit:  ## Run all pre-commit hooks across the repo
@@ -98,7 +128,10 @@ clean:  ## Remove build / cache artifacts
 	find . \( -name "__pycache__" -o -name ".forge_search" \) -type d -prune -exec rm -rf {} +
 
 .PHONY: ci
-ci: lint-check format-check typecheck test  ## What CI runs, locally
+ci: lint-check format-check typecheck coverage  ## What CI runs, locally
+	@# `coverage` rather than `test`: it runs the same two legs and adds the
+	@# floor, so this is the same work with one more assertion. `make test` is
+	@# still there for a quicker run without it.
 
 .PHONY: all
 all: sync ci security smoke  ## Everything

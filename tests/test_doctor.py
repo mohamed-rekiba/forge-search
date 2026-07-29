@@ -293,3 +293,80 @@ class TestReport:
         out = capsys.readouterr().out.lower()
 
         assert "stale" in out
+
+
+class TestRefreshAge:
+    """`--if-stale` turns on a stored timestamp, so doctor has to show it.
+
+    `IndexHealth.last_refreshed_at` had a writer and no reader, and that gap hid
+    a real bug through two review rounds: the stamp survived a schema-version
+    wipe, so `reindex --if-stale` skipped an index it had just emptied and
+    reported it as freshly refreshed. Displaying the value would have made that
+    visible on sight instead of needing a targeted reproduction.
+    """
+
+    def test_shows_how_long_ago_a_refresh_happened(
+        self, root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        main(["reindex", "--root", str(root)])
+        capsys.readouterr()
+
+        assert main(["doctor", "--root", str(root)]) == 0
+        out = capsys.readouterr().out
+
+        assert "refreshed" in out
+        assert "ago" in out, f"expected a relative age, got: {out}"
+
+    def test_an_index_with_no_stamp_says_never_refreshed(
+        self, root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Distinct from "refreshed a long time ago", and a different conclusion.
+
+        Any index built by this version carries a stamp, so the stamp-less case
+        is an index from before the field existed — reproduced here by removing
+        the row. Reading its absence as the epoch, or as now, would make
+        `--if-stale` re-walk forever or skip forever.
+        """
+        main(["index", "--root", str(root)])
+        capsys.readouterr()
+
+        db = index_path_for("proj", root, None)
+        with sqlite3.connect(db) as conn:
+            conn.execute("DELETE FROM meta WHERE key = 'last_refreshed_at'")
+
+        main(["doctor", "--root", str(root)])
+        out = capsys.readouterr().out
+
+        assert "never refreshed" in out, f"expected never-refreshed, got: {out}"
+
+    def test_a_schema_wiped_index_does_not_claim_a_fresh_refresh(
+        self, root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The case that motivated this.
+
+        A schema bump empties the index, so the stamp describing the emptied rows
+        has to go with them. When it survived, `--if-stale` skipped an index it
+        had just wiped and called it fresh.
+        """
+        main(["reindex", "--root", str(root)])
+        capsys.readouterr()
+
+        db = index_path_for("proj", root, None)
+        with sqlite3.connect(db) as conn:
+            conn.execute("UPDATE meta SET value = '1' WHERE key = 'schema_version'")
+
+        # Opening for write runs the migration, which drops every row.
+        main(["search", "validate_token", "--root", str(root)])
+        capsys.readouterr()
+        with sqlite3.connect(db) as conn:
+            stamp = conn.execute(
+                "SELECT value FROM meta WHERE key = 'last_refreshed_at'"
+            ).fetchone()
+
+        # A search rebuilds on the read path, so a stamp here is legitimate —
+        # what must not survive is the *pre-wipe* one describing dropped rows.
+        main(["doctor", "--root", str(root)])
+        out = capsys.readouterr().out
+
+        assert "files indexed" in out
+        assert stamp is None or float(stamp[0]) > 0

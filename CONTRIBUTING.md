@@ -10,16 +10,37 @@ make help
 ## The gate
 
 ```bash
-make ci     # lint, format, typecheck, tests in both install shapes
+make ci     # lint, format, typecheck, tests in both shapes, coverage floor
 ```
 
 | Target | What it does |
 |---|---|
 | `make test` | The suite in **both** install shapes |
+| `make coverage` | Both shapes, combined, floor enforced |
 | `make typecheck` | mypy + pyright, `src` only |
 | `make smoke` | Installs the built wheel in a clean venv and runs it |
 | `make security` | bandit + pip-audit |
 | `make bench ROOT=<path>` | Answer-recall benchmark against a corpus |
+
+## Coverage: one floor, over both shapes, ratcheting up
+
+The floor is `fail_under` in `pyproject.toml` under `[tool.coverage.report]`,
+currently **82%** with branch coverage on, against a combined total of ~83%.
+
+Two rules:
+
+- **It only goes up.** Raise it when the real number rises enough to leave a
+  little headroom. Lowering it to admit a change defeats the point of having it,
+  and is the one edit here that needs a reason in the PR body.
+- **It is measured over both install shapes combined**, never one of them.
+  Either leg alone understates the other: only the lexical-only run reaches the
+  absent-semantic-arm fallbacks, and only the semantic run reaches the embedder
+  and reranker at all. `make coverage` runs both and combines; CI does the same
+  across its two test jobs.
+
+A number this size is a floor, not a target. It stops erosion; it does not say
+the important paths are covered, and it never will — the defects this project
+has actually shipped were all covered lines returning a wrong answer quietly.
 
 ## Tests run twice, on purpose
 

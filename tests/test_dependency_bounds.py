@@ -20,6 +20,8 @@ rather than as a dependency problem.
 
 from __future__ import annotations
 
+import ast
+import sys
 import tomllib
 from pathlib import Path
 
@@ -36,12 +38,13 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 #: must be bounded: a major bump is exactly where an import path may vanish,
 #: which is the defect that broke every fresh install.
 #:
-#: `fastapi` and `uvicorn` are deliberately absent. They are declared to satisfy
-#: the SDK's optional HTTP transport, and no `forge_search` module imports them
-#: — so there is no import path of ours for their major to break. The mapping is
-#: kept honest by `test_every_listed_distribution_is_actually_imported`.
+#: The mapping is kept honest in both directions:
+#: `test_every_listed_distribution_is_actually_imported` catches an entry that
+#: stopped being used, and `TestEveryImportedDependencyIsDeclared` catches an
+#: import that was never declared.
 IMPORTED_DISTRIBUTIONS = {
     "mcp": "mcp",
+    "numpy": "numpy",
     "onnxruntime": "onnxruntime",
     "sqlite-vec": "sqlite_vec",
     "tokenizers": "tokenizers",
@@ -163,6 +166,102 @@ class TestEveryImportedDependencyIsBounded:
             "src/ imports it. Either the mapping is stale or the dependency is "
             "no longer needed."
         )
+
+
+def _third_party_modules_imported_under_src() -> set[str]:
+    """Top-level third-party module names imported anywhere under `src/`.
+
+    Parsed rather than grepped: a text scan cannot tell an import from the word
+    appearing in a docstring, and both of numpy's call sites are function-local
+    imports that a line-oriented pattern would have to guess at.
+    """
+    found: set[str] = set()
+    for path in SRC.rglob("*.py"):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                found.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                # level > 0 is a relative import — this project's own code.
+                if node.level == 0 and node.module:
+                    found.add(node.module.split(".")[0])
+    return {
+        m
+        for m in found
+        if m not in sys.stdlib_module_names and m != "forge_search" and m != "__future__"
+    }
+
+
+class TestEveryImportedDependencyIsDeclared:
+    """The other direction, which is how an undeclared import stayed invisible.
+
+    The tests above check listed → imported: everything in the mapping must
+    really be used. Nothing checked imported → listed, so a module imported in
+    `src/` and declared nowhere was outside the guard entirely. `numpy` was
+    exactly that: two call sites using its API, absent from `pyproject.toml`,
+    present only as a transitive of `onnxruntime` under `numpy>=1.21.6` — which
+    means a third party's requirement, unbounded across the major, chose the
+    version this code runs against.
+
+    Same asymmetry the `packaging` fix hit — a test policing declarations
+    relying on an undeclared transitive itself — caught there for a test-only
+    dependency and missed here for a runtime one.
+    """
+
+    def test_every_third_party_import_is_in_the_mapping(self) -> None:
+        known = set(IMPORTED_DISTRIBUTIONS.values())
+        missing = sorted(_third_party_modules_imported_under_src() - known)
+        assert not missing, (
+            f"imported under src/ but absent from IMPORTED_DISTRIBUTIONS: {missing}. "
+            "Anything this code imports directly needs a declaration with a bounded "
+            "major, otherwise the version it runs against is whatever a transitive "
+            "dependency happens to ask for."
+        )
+
+    def test_every_third_party_import_is_declared(self) -> None:
+        declared = _declared_requirements()
+        module_to_dist = {mod: dist for dist, mod in IMPORTED_DISTRIBUTIONS.items()}
+        undeclared = sorted(
+            module_to_dist.get(mod, mod)
+            for mod in _third_party_modules_imported_under_src()
+            if module_to_dist.get(mod, mod) not in declared
+        )
+        assert not undeclared, (
+            f"imported under src/ but declared in no dependency group: {undeclared}."
+        )
+
+
+class TestHttpExtraStaysEmpty:
+    """`[http]` is an alias, and the reason it can be empty is checkable.
+
+    Both HTTP transports run on a base install because `mcp` requires starlette
+    and uvicorn itself. Anything added back here would be either redundant with
+    that or unused, which is what the extra held before — a duplicate `uvicorn`
+    and a `fastapi` nothing imported.
+    """
+
+    def test_the_extra_is_declared_but_empty(self) -> None:
+        data = tomllib.loads(PYPROJECT.read_text())
+        extras = data["project"].get("optional-dependencies", {})
+        assert "http" in extras, (
+            "the extra is kept so `forge-search[http]` still resolves; removing "
+            "it breaks that install line."
+        )
+        assert extras["http"] == [], (
+            f"[http] declares {extras['http']}. HTTP transport needs no extra — "
+            "mcp requires starlette and uvicorn unconditionally."
+        )
+
+    def test_mcp_still_supplies_the_http_stack(self) -> None:
+        """The premise the empty extra rests on, checked rather than assumed."""
+        import importlib.metadata as md
+
+        required = " ".join(md.requires("mcp") or ())
+        for package in ("starlette", "uvicorn"):
+            assert package in required, (
+                f"mcp no longer requires {package}, so [http] being empty is no "
+                "longer safe — the transports lost a dependency nothing declares."
+            )
 
 
 class TestImportContractHolds:

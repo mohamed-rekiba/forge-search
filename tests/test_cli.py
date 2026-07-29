@@ -75,3 +75,48 @@ def test_other_unexpanded_variables_are_still_rejected(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         main(["index", "--root", "${projectRoot}"])
     assert "unexpanded variable" in str(exc.value)
+
+
+def test_bare_dot_still_means_the_working_directory(tmp_path, monkeypatch):
+    # The other half of the cwd shim, and the half that must keep working.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "f.md").write_text("hello\n")
+    assert main(["index", "--root", "."]) == 0
+
+
+def test_dot_slash_prefix_resolves_under_the_working_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "f.md").write_text("hello\n")
+    assert main(["index", "--root", "./sub"]) == 0
+
+
+def test_a_dot_prefixed_directory_name_is_not_treated_as_the_cwd_shim(
+    tmp_path, monkeypatch
+):
+    # `.smoke/corpus` is not the cwd shim, it is a hidden directory. Matching
+    # the shim's "." on a bare prefix spliced cwd onto the remainder with no
+    # separator — `/work` + `smoke/corpus` — and reported a path the caller
+    # never typed. This is what broke `make smoke`, whose root is `.smoke/corpus`.
+    monkeypatch.chdir(tmp_path)
+    hidden = tmp_path / ".smoke" / "corpus"
+    hidden.mkdir(parents=True)
+    (hidden / "f.md").write_text("hello\n")
+    assert main(["index", "--root", ".smoke/corpus"]) == 0
+
+
+def test_a_single_dot_prefixed_directory_is_not_the_cwd_shim(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".hidden").mkdir()
+    (tmp_path / ".hidden" / "f.md").write_text("hello\n")
+    assert main(["index", "--root", ".hidden"]) == 0
+
+
+def test_parent_relative_root_resolves_to_the_parent(tmp_path, monkeypatch):
+    # `..` starts with "." too, so the same bare-prefix match turned it into
+    # cwd + "." — a sibling that does not exist.
+    (tmp_path / "f.md").write_text("hello\n")
+    child = tmp_path / "child"
+    child.mkdir()
+    monkeypatch.chdir(child)
+    assert main(["index", "--root", ".."]) == 0
