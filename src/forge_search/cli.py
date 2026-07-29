@@ -17,13 +17,15 @@ from __future__ import annotations
 
 import argparse
 import re
+import sqlite3
 import sys
 from pathlib import Path
 
 from .core.bench import BenchQuery, run_bench
+from .core.cache import index_path_for
 from .core.embedding import HashingEmbedder, OnnxEmbedder
 from .core.hybrid import HybridIndex
-from .core.index import LexicalIndex
+from .core.index import LexicalIndex, inspect_index
 from .core.model import download, is_present, model_dir, resolve_model, resolve_reranker
 from .core.query import QueryError
 from .core.rerank import CrossEncoderReranker
@@ -347,6 +349,93 @@ def _cmd_index(args: argparse.Namespace) -> int:
     return 0
 
 
+def _semantic_status() -> str:
+    """Whether the semantic arm could run, without making it run.
+
+    Importing rather than checking for the distribution is deliberate: a wheel
+    can be installed and still fail to load (onnxruntime's native library is the
+    usual case), and "installed but unusable" is exactly what a probe should
+    catch. It costs ~130ms, which is well under the tree walk below it.
+
+    No model is fetched — `warm` exists for that, and a probe that downloads
+    ~90 MB inside a session-start hook would be a trap.
+    """
+    try:
+        import onnxruntime  # noqa: F401
+        import sqlite_vec  # noqa: F401
+        import tokenizers  # noqa: F401
+    except ImportError as exc:
+        # `exc.name` is None when a package raises ImportError from its own
+        # code rather than failing to be found — the normal shape of an
+        # onnxruntime native-library failure. Reporting "None not installed"
+        # there would be worse than saying nothing, so fall back to the message.
+        detail = exc.name or str(exc) or "reason unknown"
+        return f"unavailable ({detail}) — lexical-only"
+    return "available"
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    """Report health without changing any of it.
+
+    Exit 0 means "this install can answer queries". A missing or stale index is
+    NOT a failure — search creates and refreshes indexes on the read path, so
+    both are ordinary states, and reporting them as errors would make the exit
+    code useless as a liveness probe.
+
+    Non-zero is reserved for a root whose index exists but cannot be read — an
+    unreadable directory, a corrupt database. Those do NOT self-heal, so
+    reporting them the same way as an absent index would be the one outcome a
+    probe must never produce: healthy while broken.
+
+    Inspection goes through `inspect_index`, never `LexicalIndex`. That
+    constructor creates its directory, connects read-write, and runs
+    `_migrate_if_stale`, which DELETEs every row on a schema-version mismatch —
+    so using it here would wipe an index built by a previous release and then
+    truthfully report it as empty.
+    """
+    print(f"semantic arm: {_semantic_status()}")
+
+    # Roots first: `_index_dir`'s middle precedence tier reads the resolution
+    # that `_resolve_roots` populates, so resolving after it would silently skip
+    # an adapter's index_dir preference and look in the default location.
+    roots = _resolve_roots(args)
+    index_dir = _index_dir(args)
+
+    adapter = getattr(args, "adapter", None)
+    print(f"roots: {len(roots)}" + (f" (adapter: {adapter})" if adapter else ""))
+
+    problems = 0
+    for root in roots:
+        try:
+            health = inspect_index(root, index_dir=index_dir)
+        except (OSError, sqlite3.Error) as exc:
+            # Report and keep going: one unreadable root must not hide the state
+            # of the others, which is what an uncaught error here would do.
+            print(f"  {root.label}: PROBLEM — cannot read its index ({exc})")
+            problems += 1
+            continue
+
+        if health is None:
+            # Cold start, not a fault. Name where it *will* go, so a wrong
+            # --index-dir shows up here rather than as a confusing empty search.
+            db = index_path_for(root.label, root.path, index_dir)
+            print(f"  {root.label}: no index yet — will be created at {db}")
+            continue
+
+        notes = ["stale" if health.stale else "fresh"]
+        if not health.schema_current:
+            # Not a fault either: the next index/search rebuilds it. Worth
+            # saying, because it explains a rebuild the operator did not ask for.
+            notes.append(f"schema v{health.schema_version} — will rebuild")
+        detail = ", ".join(notes)
+        print(f"  {root.label}: {health.files} files indexed, {detail} ({health.path})")
+
+    if problems:
+        print(f"{problems} root(s) have an index that cannot be read", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _cmd_search(args: argparse.Namespace) -> int:
     roots = _resolve_roots(args)
     search = ForgeSearch(roots=roots, embedder=_embedder(args))
@@ -446,6 +535,13 @@ def main(argv: list[str] | None = None) -> int:
     index.add_argument("--force", action="store_true", help="Rebuild from scratch")
     index.set_defaults(func=_cmd_index)
 
+    doctor = sub.add_parser(
+        "doctor",
+        help="Report index health. Exits 0 when the install can serve queries.",
+    )
+    _add_root_args(doctor)
+    doctor.set_defaults(func=_cmd_doctor)
+
     search = sub.add_parser("search", help="One-shot search")
     _add_root_args(search)
     search.add_argument("query")
@@ -462,7 +558,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     search.set_defaults(func=_cmd_search)
 
-    for _p in (serve, index, search):
+    # doctor included deliberately: without it, doctor resolves the default
+    # index location and reports a correctly-indexed root as unindexed.
+    for _p in (serve, index, doctor, search):
         _index_dir_flag(_p)
 
     warm = sub.add_parser("warm", help="Fetch the embedding model (semantic arm)")
