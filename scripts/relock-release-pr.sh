@@ -69,10 +69,16 @@ git diff --stat -- uv.lock | sed 's/^/  /'
 # runs at all, because the GITHUB_TOKEN that opened it cannot trigger
 # `pull_request` workflows. So this is the only place the lockfile about to be
 # released gets verified.
-uv sync --locked --quiet || fail \
-    "the lockfile this just produced does not satisfy pyproject.toml." \
-    "Not pushing it — a release PR has no CI, so a bad lock here would reach" \
-    "the tag unchallenged."
+#
+# What this proves is that the lock INSTALLS — artifacts resolve, sdists build,
+# the resolution holds for this interpreter. It cannot prove agreement with
+# pyproject.toml, because `uv lock` above just made them agree by construction.
+# `--all-extras` because the semantic extra carries four of the five declared
+# dependencies; validating the base install alone would leave them unchecked.
+uv sync --locked --all-extras --quiet || fail \
+    "the lockfile this just produced does not install." \
+    "Not pushing it — a release PR has no CI, so an unusable lock would reach" \
+    "the tag unchallenged. Run \`uv sync --locked --all-extras\` to see why."
 
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

@@ -287,11 +287,13 @@ for the release tag. An event-driven re-lock would simply never fire.
 **The PR is found by title, not by the action's `pr` output.** Not because that
 output is undocumented — `headBranchName` is declared on the `PullRequest`
 interface the README links. The reason is stronger: `pr` is **unset in exactly
-the case that matters**. release-please returns nothing for a PR whose body did
-not change, and the action filters those out, so both `pr` and `prs_created` go
-empty whenever an existing release PR is merely updated rather than created.
-That is the adoption case, and the retry case. The step therefore carries no
-`if:` gate, and finds the PR by the title pattern we configure ourselves.
+the case that matters**. release-please returns nothing for a PR whose body it
+left unchanged, and the action filters those out, so both `pr` and `prs_created`
+go empty on a push that updates no release-note content — the adoption case,
+where the PR already exists and only the lock is stale, and the retry case. An
+update that *does* change the body sets both, so this is narrower than "updates
+never report a PR". The step therefore carries no `if:` gate, and finds the PR by
+the title pattern we configure ourselves.
 
 **A release PR has no CI at all.** Not "checks that describe the pre-re-lock
 commit" — zero check runs, because the `GITHUB_TOKEN` that opened it cannot
