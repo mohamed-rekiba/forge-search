@@ -370,7 +370,10 @@ def _cmd_reindex(args: argparse.Namespace) -> int:
 
     for root in _resolve_roots(args):
         with LexicalIndex(root, index_dir=index_dir) as index:
-            if window is not None:
+            # `--force` outranks the gate. It means "rebuild", and everywhere
+            # else force bypasses a cheap-skip path, so honouring the window
+            # ahead of it would make `--force --if-stale N` a silent no-op.
+            if window is not None and not args.force:
                 last = index.last_refreshed_at()
                 # A missing stamp means due, never "skip forever" — an index
                 # predating the stamp must still get refreshed.
@@ -602,7 +605,8 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Skip entirely when the last refresh was under SECONDS ago. Reads "
             "one metadata row rather than walking the tree, which is what makes "
-            "an unconditional call cheap. 0 means always refresh."
+            "an unconditional call cheap. 0 means always refresh. --force "
+            "overrides this."
         ),
     )
     reindex.set_defaults(func=_cmd_reindex)
