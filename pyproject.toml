@@ -1,6 +1,6 @@
 [project]
 name = "forge-search"
-version = "0.4.2"
+version = "0.5.0"
 description = "Local code and docs search over one or many repositories, served as an MCP tool."
 readme = "README.md"
 authors = [

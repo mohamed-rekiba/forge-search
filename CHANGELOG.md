@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0](https://github.com/mohamed-rekiba/forge-search/compare/v0.4.2...v0.5.0) (2026-07-29)
+
+
+### Features
+
+* **#21:** add a doctor command that reports index health ([#31](https://github.com/mohamed-rekiba/forge-search/issues/31)) ([581fba1](https://github.com/mohamed-rekiba/forge-search/commit/581fba14f22f528b5eb6a7fbb01b9913ac3c208c)), closes [#21](https://github.com/mohamed-rekiba/forge-search/issues/21)
+* **#22:** add a reindex command that can skip recently-refreshed indexes ([#34](https://github.com/mohamed-rekiba/forge-search/issues/34)) ([df72d18](https://github.com/mohamed-rekiba/forge-search/commit/df72d188feb1594931530637f4e15af83fb05f64)), closes [#22](https://github.com/mohamed-rekiba/forge-search/issues/22)
+
+
+### Bug Fixes
+
+* **#23:** restore fresh installs by moving to the current MCP SDK ([#24](https://github.com/mohamed-rekiba/forge-search/issues/24)) ([e854efc](https://github.com/mohamed-rekiba/forge-search/commit/e854efcd46528922bb84a1b1461b8584979de8d2)), closes [#23](https://github.com/mohamed-rekiba/forge-search/issues/23)
+* pin setup-uv to v9.0.0 — it publishes no major tag ([89ea1b2](https://github.com/mohamed-rekiba/forge-search/commit/89ea1b22dda82e2a87190ec38399571a1f542fa7))
+
+
+### Documentation
+
+* **#35:** document the doctor and reindex commands, and the portfolio MCP config ([#36](https://github.com/mohamed-rekiba/forge-search/issues/36)) ([0bce47d](https://github.com/mohamed-rekiba/forge-search/commit/0bce47d01a0a6d0151f3fbd5eef712e6d2bb4578))
+* record the action-pinning decision ([f220a6e](https://github.com/mohamed-rekiba/forge-search/commit/f220a6e884bd1f74f115b804918d98a5b026bd7c))
+
 ## [0.4.2](https://github.com/mohamed-rekiba/forge-search/compare/v0.4.1...v0.4.2) (2026-07-21)
 
 
