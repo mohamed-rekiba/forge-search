@@ -63,7 +63,7 @@ right answer for anything you commit to a config file.
 | Flag | Default | Applies to | What it does |
 |---|---|---|---|
 | `--root <path>` | *required* | all except warm | A tree to index. Repeatable. |
-| `--adapter <name>` | none | all except warm | Expand one root into the projects it contains |
+| `--sub-projects <dir>[,<dir>...]` | none | all except warm | Directories under a root (resolved relative to it) whose checkouts become additional labelled roots |
 | `--index-dir <path>` | `.forge_search` | all except warm | Where indexes live. Relative = per root; absolute = shared |
 | `--semantic` | off | serve, search, bench | Enable the semantic arm (needs the extra + `warm`) |
 | `--model <name>` | `all-minilm` | serve, search, bench, warm | Embedding model short name |
@@ -97,9 +97,9 @@ Add to `.mcp.json` in your project, with an **absolute path**:
 Tools then appear as `mcp__forge-search__search_code`, `…__search_docs`, and
 `…__reindex`.
 
-To serve a whole apexyard portfolio from one server, add `"--adapter",
-"apexyard"` and `"--name", "apexyard-search"` to those args, with the root
-pointing at the fork that holds `apexyard.projects.yaml` — see the
+To serve a whole portfolio of clones from one server, add `"--sub-projects",
+"workspace"` (or whatever directory holds them) and a `"--name"` of your
+choosing to those args, with the root pointing at the parent tree — see the
 [README](../README.md#register-with-an-mcp-client) for the full block.
 
 The server name is configurable but should stay `forge-search` unless you have
@@ -137,8 +137,8 @@ configuration, not a failure.
 The in-tree directory ships a `.gitignore` containing `*`, so it ignores
 itself and its contents with no action from you.
 
-An adapter can move the default; an explicit `--index-dir` always wins.
-Precedence: `--index-dir` > adapter > `.forge_search`.
+An explicit `--index-dir` always wins. Precedence: `--index-dir` >
+`.forge_search`.
 
 ## Transports
 
@@ -159,23 +159,32 @@ needs an extra** — `mcp` requires starlette and uvicorn itself, so a plain
 `uv tool install forge-search` can already serve HTTP. `forge-search[http]`
 still resolves, to nothing, so an existing install line keeps working.
 
-## Adapters
+## Sub-projects
 
 Some trees are really several projects — a parent repo with project clones
 underneath it. Search finds those files either way, since subdirectories are
-traversed like any others. What an adapter adds is **per-project labels**,
-which is what makes `project="name"` filtering work and keeps result paths
-relative to each project rather than to the parent.
+traversed like any others. What `--sub-projects` adds is **per-project
+labels**, which is what makes `project="name"` filtering work and keeps
+result paths relative to each project rather than to the parent.
 
 ```bash
-forge-search serve --root ws=/abs/portfolio --adapter apexyard
-# → adapter: apexyard   apexyard expanded ws into 4
+forge-search serve --root ws=/abs/portfolio --sub-projects workspace
+# → roots: ws=/abs/portfolio, alpha=…, beta=…, gamma=…, delta=…   ws expanded into 4 sub-project(s)
 ```
 
-An adapter that finds nothing to expand leaves the root unchanged, so naming
-one can never make a search cover *less* than you asked for. Any expansion is
-reported, because turning one root into several is more than you literally
-requested.
+Each name in `--sub-projects` is a directory, resolved **relative to the
+root** it follows — so `--sub-projects ../elsewhere/workspace` can reach
+outside the root entirely, which is how a split-portfolio layout (registry
+and clones in a sibling repository) is expressed without any config file.
+Comma-separate more than one: `--sub-projects packages,apps`.
+
+An entry becomes a root when it contains `.git` — checked for **existence**,
+not for being a directory, because a `git worktree` checkout's `.git` is a
+file (a `gitdir:` pointer), not a directory, and a directory-only check would
+silently skip every one. Hidden entries and plain files are skipped. A named
+directory that does not exist is not an error — the root is still searched,
+just without that expansion, and any real expansion is reported because
+turning one root into several is more than you literally asked for.
 
 ## Environment variables
 

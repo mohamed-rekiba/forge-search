@@ -202,10 +202,11 @@ class TestReindexTool:
 
 class TestDynamicRootDiscovery:
     """A project registered after the server started must be reachable without
-    a restart. The root set is not fixed for the life of the server: an adapter
-    over a portfolio re-reads its registry, so a new clone should be found the
-    first time it is named. Requiring a restart would be exactly the "rely on a
-    human to remember" convention that freshness-on-read exists to remove.
+    a restart. The root set is not fixed for the life of the server: a
+    `--sub-projects` directory is re-scanned each time, so a clone that
+    appeared since startup should be found the first time it is named.
+    Requiring a restart would be exactly the "rely on a human to remember"
+    convention that freshness-on-read exists to remove.
     """
 
     def _make(self, tmp_path: Path, roots: list[Root], *, resolver=None) -> ForgeSearch:

@@ -129,12 +129,13 @@ workflow — see the note in `.github/workflows/publish.yml` about
 src/forge_search/
   cli.py              argument surface
   core/               generic; knows nothing about any integration
-  adapters/           integration-specific root expanders
 tests/                mirrors core/, plus an end-to-end MCP smoke suite
 bench/                benchmark fixtures
 docs/                 architecture, indexing, searching, decisions
 ```
 
-`core/` must never import `adapters/`. A test asserts it — by checking import
-statements rather than word occurrences, because the first version passed
-while a `core/` docstring cheerfully mentioned `--adapter apexyard`.
+`core/` takes no dependency on any integration's config format. A portfolio of
+several projects is expressed with `--sub-projects`, stated by the caller —
+there is nothing left in `core/` that reads a config file to infer structure
+the caller could simply name. See [docs/decisions.md](docs/decisions.md) for
+why the seam that used to do that inference was removed rather than kept.

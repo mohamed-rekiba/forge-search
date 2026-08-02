@@ -117,9 +117,9 @@ class ForgeSearch:
     mode: str = SearchMode.HYBRID
     #: Where indexes live. None = shared OS cache dir. See cache.index_dir_for.
     index_dir: str | None = None
-    #: One line naming the resolved roots and active adapter. Surfaced in the
-    #: server instructions rather than on stderr, where an MCP client would
-    #: render it as a warning on every launch.
+    #: One line naming the resolved roots. Surfaced in the server
+    #: instructions rather than on stderr, where an MCP client would render
+    #: it as a warning on every launch.
     summary: str | None = None
     #: Re-runs root resolution on demand. Present, an unknown project name
     #: triggers one re-resolution before it is allowed to fail — so a project

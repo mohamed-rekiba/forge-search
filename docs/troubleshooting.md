@@ -52,7 +52,7 @@ Results look plausible but come from somewhere you did not ask about. Check
 the resolved root — it is reported at startup:
 
 ```text
-forge-search: roots: apexyard=/Users/you/code/apexyard  adapter: apexyard
+forge-search: roots: portfolio=/Users/you/code/portfolio  portfolio expanded into 4 sub-project(s)
 ```
 
 If that path is wrong and you used `${workspaceFolder}`, the working directory

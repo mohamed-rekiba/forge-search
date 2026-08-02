@@ -2,8 +2,9 @@
 
 **Everything here is explicit. Nothing is discovered.**
 
-The caller names the roots as absolute paths. The adapter, if any, is named
-with `--adapter`. There is no walk-up, no working-directory inference, no
+The caller names the roots as absolute paths. If a root holds several
+projects, the caller also names the directories to expand it into, with
+`--sub-projects`. There is no walk-up, no working-directory inference, no
 marker sniffing, and no fallback guess.
 
 An earlier version of this docstring said to use `--root ${workspaceFolder}`
@@ -23,13 +24,17 @@ This replaced a layered discovery scheme, and the reasoning is worth keeping:
   That cost is real — an absolute path makes a shared `.mcp.json`
   per-machine — but it fails at startup with a message, where a wrong guess
   fails silently on every query forever.
-* **Detection has the same flaw as guessing.** An adapter that enables itself
-  because it spotted a file can fire when unwanted and stay silent when
-  wanted. Naming it costs one flag and removes the whole failure class.
+* **Detection has the same flaw as guessing.** A component that expands
+  itself because it spotted a marker file can fire when unwanted and stay
+  silent when wanted. Naming it costs one flag and removes the whole failure
+  class.
 
-What adapters still do is the part a caller genuinely cannot supply: knowing
-that one root is a portfolio containing several projects, and what each should
-be called.
+`--sub-projects` answers the one question a root's own path genuinely cannot:
+that it holds several projects, and which directories those live under. That
+used to be answered by an adapter that read a portfolio's own config to infer
+the same structure — the one guess this module made anywhere. Stating it as a
+flag instead removes that exception rather than keeping it; see
+docs/decisions.md for the full reasoning and what it gives up.
 """
 
 from __future__ import annotations
@@ -39,7 +44,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["Root", "RootProvider", "Resolution", "resolve_roots"]
+__all__ = ["Root", "Resolution", "resolve_roots"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,76 +78,71 @@ class Root:
         object.__setattr__(self, "path", Path(self.path).expanduser().resolve())
 
 
-class RootProvider:
-    """The single seam between the generic core and any integration.
+def _sub_project_roots(root: Root, sub_project_dirs: Sequence[str]) -> list[Root]:
+    """Every checkout under `root`'s named sub-project directories.
 
-    An adapter is a root **expander**, not a root discoverer. It is handed a
-    root the caller has already named, decides whether that root is one it
-    understands, and if so expands it into the several labelled roots it
-    really contains.
+    Each directory in `sub_project_dirs` is resolved **relative to `root`**,
+    not the caller's working directory — that is what lets
+    `--sub-projects ../portfolio/workspace` reach outside the root at all,
+    the split-portfolio case a config file used to be read for. A named
+    directory that does not exist is not an error: the root is still used,
+    just without that expansion.
 
-    **Adapters are chosen explicitly, never detected.** `--adapter <name>`
-    selects one; without it, roots are used exactly as given.
-
-    Nothing is inferred — not from a marker file in the project, not from the
-    working directory, not by walking parents. Detection was removed on
-    purpose: an adapter that fires because it spotted a file is an adapter
-    that can fire when you did not mean it to, and can fail to fire when you
-    did, both silently. The caller already knows which shape of project this
-    is; asking them costs one flag and removes an entire class of wrong-guess
-    failure.
-
-    Keeping the seam this narrow is deliberate. A wider one would let
-    integration concepts into the core, at which point "works standalone"
-    becomes a claim in a README rather than a property of the code.
+    An entry counts as a checkout when it contains `.git` — tested for
+    **existence, not directory-ness**. A worktree's `.git` is a *file*
+    (a `gitdir: /path/to/real/.git/worktrees/name` pointer), so `is_dir()`
+    would silently exclude every worktree checkout while a plain clone's
+    `.git` directory passed. Hidden entries and plain files are skipped
+    before that check even runs.
     """
-
-    #: The name `--adapter` selects this by.
-    name: str = ""
-
-    #: Where this integration wants indexes, overriding the default
-    #: `.forge_search` per root. An adapter knows the shape of the tree it
-    #: expands — a portfolio of many project clones may want one shared
-    #: directory rather than one per clone — and the caller usually does not.
-    #: An explicit `--index-dir` still wins; this only moves the default.
-    index_dir: str | None = None
-
-    def expand(self, root: Root) -> Sequence[Root]:  # pragma: no cover - interface
-        """Turn one root into the roots it actually contains."""
-        return [root]
+    found: list[Root] = []
+    # Two named directories can resolve to the same place — `workspace` twice,
+    # or `workspace` and `./workspace`. Yielding a checkout twice would index
+    # it twice and report a count nobody can reconcile with the tree, so the
+    # same resolved path is taken once. This is repetition, not the ambiguity
+    # `_reject_duplicate_labels` raises on: there is exactly one right answer.
+    seen: set[Path] = set()
+    for rel in sub_project_dirs:
+        base = (root.path / rel).resolve()
+        if not base.is_dir():
+            continue
+        for entry in sorted(base.iterdir(), key=lambda p: p.name):
+            if entry.name.startswith("."):
+                continue
+            if not entry.is_dir():
+                continue
+            if not (entry / ".git").exists():
+                continue
+            resolved_entry = entry.resolve()
+            if resolved_entry in seen:
+                continue
+            seen.add(resolved_entry)
+            found.append(Root(label=entry.name, path=entry))
+    return found
 
 
 @dataclass(frozen=True, slots=True)
 class Resolution:
     """The roots that will be searched, and how each came to be.
 
-    `expansions` records which given root an adapter turned into which set, so
-    the operator can see it at startup. A root list that silently differs from
-    what was asked for is the failure this reporting exists to prevent.
+    `expansions` records which given root's `--sub-projects` scan turned up
+    extra roots, so the operator can see it at startup. A root list that
+    silently differs from what was asked for is the failure this reporting
+    exists to prevent.
     """
 
     roots: tuple[Root, ...]
-    expansions: tuple[tuple[str, str, int], ...] = ()  # (adapter, given label, count)
-    #: Index location preferred by the active adapter, if it named one.
-    #: Advisory: an explicit `--index-dir` overrides it.
-    index_dir: str | None = None
-
-    #: The adapter named by `--adapter`, if any. Recorded even when it
-    #: expanded nothing: "which adapter is active" is a question the operator
-    #: asked by passing the flag, and silence is not an answer.
-    adapter: str | None = None
+    expansions: tuple[tuple[str, int], ...] = ()  # (given label, sub-projects found)
 
     def describe(self) -> str:
-        """One line naming the roots and the active adapter."""
+        """One line naming the resolved roots."""
         names = ", ".join(f"{r.label}={r.path}" for r in self.roots) or "(none)"
         parts = [f"roots: {names}"]
-        if self.adapter:
-            parts.append(f"adapter: {self.adapter}")
         if self.expansions:
             parts.append(
                 "; ".join(
-                    f"{adapter} expanded {label} into {count}"
-                    for adapter, label, count in self.expansions
+                    f"{label} expanded into {count} sub-project(s)"
+                    for label, count in self.expansions
                 )
             )
         return "  ".join(parts)
@@ -151,57 +151,65 @@ class Resolution:
 def resolve_roots(
     given: Iterable[Root],
     *,
-    adapters: Sequence[RootProvider] = (),
-    adapter_name: str | None = None,
+    sub_projects: Sequence[str] = (),
 ) -> Resolution:
     """Resolve the roots to search from the roots the caller named.
 
     **Everything is explicit.** Roots are stated by the caller as absolute
-    paths, and the adapter, if any, is named by ``--adapter``. Nothing is
-    discovered, detected, or inferred.
+    paths; sub-project directories, if any, are named by `--sub-projects` and
+    resolved relative to each root in turn. Nothing is discovered, detected,
+    or inferred.
 
-    That is the whole design. Inferring the root solved a problem the caller
-    had already solved, and a wrong inference is silent where a wrong absolute
-    path fails at startup. Detecting the adapter from a marker file had the
-    same shape: it can fire when unwanted and fail to fire when wanted, both
-    silently, and silence is the failure this project exists to eliminate.
-    With no adapter named, roots are used exactly as given.
+    Each given root is always searched — that part never changes. With no
+    `--sub-projects`, roots are used exactly as given, same as before this
+    flag existed.
     """
     resolved: list[Root] = []
-    expansions: list[tuple[str, str, int]] = []
-
-    chosen = None
-    if adapter_name:
-        chosen = next((a for a in adapters if a.name == adapter_name), None)
-        if chosen is None:
-            known = ", ".join(a.name for a in adapters if a.name) or "(none available)"
-            raise ValueError(f"unknown adapter {adapter_name!r}; available: {known}")
+    expansions: list[tuple[str, int]] = []
 
     for root in given:
-        if chosen is None:
-            resolved.append(root)
+        resolved.append(root)
+        if not sub_projects:
             continue
 
-        expanded = list(chosen.expand(root))
+        expanded = _sub_project_roots(root, sub_projects)
         if not expanded:
-            # An adapter that claims a root but yields nothing would silently
-            # drop it. Keep the original rather than searching less than asked.
-            resolved.append(root)
+            # Nothing found under any named directory — not worth reporting.
+            # "expanded into 0" describes a non-event, and on a stdio MCP
+            # server every stderr line is rendered as a warning by the client.
             continue
 
         resolved.extend(expanded)
-        if expanded != [root]:
-            # Only report a real expansion. An adapter that finds nothing to
-            # expand returns the root unchanged, and announcing "expanded X
-            # into 1" describes a non-event — on a stdio MCP server that line
-            # goes to stderr, where clients render it as a warning.
-            expansions.append(
-                (chosen.name or type(chosen).__name__, root.label, len(expanded))
-            )
+        expansions.append((root.label, len(expanded)))
 
-    return Resolution(
-        tuple(resolved),
-        tuple(expansions),
-        adapter=adapter_name,
-        index_dir=chosen.index_dir if chosen else None,
-    )
+    _reject_duplicate_labels(resolved)
+    return Resolution(tuple(resolved), tuple(expansions))
+
+
+def _reject_duplicate_labels(roots: Sequence[Root]) -> None:
+    """Fail loudly when two roots share a label.
+
+    Indexes are keyed by label, so a second root with a label already taken
+    silently reuses the first one's index: the tree is resolved, printed at
+    startup, and returns nothing of its own. `core/cache.py` already defends
+    this on disk by hashing the path into shared-directory filenames; nothing
+    defended it at resolution, because until sub-project expansion every label
+    was either stated by the caller or came from one flat list of unique names.
+
+    Expansion makes collisions easy and ordinary: `--sub-projects
+    packages,apps` with a `foo` under each — the help text's own example
+    shape — or a checkout whose name matches its own root's label. Raising
+    names both paths, because "foo is ambiguous" without them just sends the
+    reader looking.
+    """
+    seen: dict[str, Path] = {}
+    for root in roots:
+        first = seen.get(root.label)
+        if first is not None and first != root.path:
+            raise ValueError(
+                f"duplicate root label {root.label!r}: {first} and {root.path}. "
+                "Labels key the indexes, so the second would silently reuse the "
+                "first's. Rename a directory, or name the roots explicitly with "
+                "--root label=path."
+            )
+        seen[root.label] = root.path
