@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/mohamed-rekiba/forge-search/compare/v0.6.0...v1.0.0) (2026-08-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **#45:** replace the apexyard root adapter with --sub-projects ([#46](https://github.com/mohamed-rekiba/forge-search/issues/46))
+
+### Refactors
+
+* **#45:** replace the apexyard root adapter with --sub-projects ([#46](https://github.com/mohamed-rekiba/forge-search/issues/46)) ([be1e1f8](https://github.com/mohamed-rekiba/forge-search/commit/be1e1f88c8b9b49389a2704ca9be2099b0923189))
+
 ## [0.6.0](https://github.com/mohamed-rekiba/forge-search/compare/v0.5.0...v0.6.0) (2026-07-29)
 
 
