@@ -12,6 +12,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from forge_search.cli import _parse_sub_projects
 from forge_search.core.roots import Root, resolve_roots
 
 
@@ -165,3 +168,94 @@ class TestReporting:
 
         assert {r.label for r in result.roots} == {"a", "b", "one"}
         assert result.expansions == (("a", 1),)
+
+
+class TestDuplicateLabels:
+    """Labels key the indexes, so a collision silently loses a project.
+
+    Reproduced on the first cut of this feature: `packages,apps` with a `foo`
+    under each resolved both, printed both at startup, and served one — the
+    second reused the first's index and its own content was unreachable.
+    """
+
+    def test_same_name_under_two_dirs_raises(self, tmp_path: Path) -> None:
+        _checkout(tmp_path / "root" / "packages", "foo")
+        _checkout(tmp_path / "root" / "apps", "foo")
+
+        with pytest.raises(ValueError, match="duplicate root label 'foo'"):
+            resolve_roots(
+                [Root(label="r", path=tmp_path / "root")],
+                sub_projects=["packages", "apps"],
+            )
+
+    def test_the_error_names_both_paths(self, tmp_path: Path) -> None:
+        """"foo is ambiguous" without them just sends the reader looking."""
+        _checkout(tmp_path / "root" / "packages", "foo")
+        _checkout(tmp_path / "root" / "apps", "foo")
+
+        with pytest.raises(ValueError) as excinfo:
+            resolve_roots(
+                [Root(label="r", path=tmp_path / "root")],
+                sub_projects=["packages", "apps"],
+            )
+
+        message = str(excinfo.value)
+        assert "packages/foo" in message
+        assert "apps/foo" in message
+
+    def test_a_checkout_colliding_with_its_own_root_raises(
+        self, tmp_path: Path
+    ) -> None:
+        _checkout(tmp_path / "root" / "workspace", "r")
+
+        with pytest.raises(ValueError, match="duplicate root label 'r'"):
+            resolve_roots(
+                [Root(label="r", path=tmp_path / "root")], sub_projects=["workspace"]
+            )
+
+    def test_the_same_directory_twice_is_repetition_not_ambiguity(
+        self, tmp_path: Path
+    ) -> None:
+        """One right answer, so take it once rather than raising."""
+        _checkout(tmp_path / "root" / "workspace", "one")
+
+        result = resolve_roots(
+            [Root(label="r", path=tmp_path / "root")],
+            sub_projects=["workspace", "workspace", "./workspace"],
+        )
+
+        assert [r.label for r in result.roots] == ["r", "one"]
+        assert result.expansions == (("r", 1),)
+
+
+class TestParseSubProjects:
+    """The comma-split had no coverage at all.
+
+    Mutation testing found it: deleting the split entirely left every test
+    passing, because the one named for it passed an already-split list. That
+    gap is exactly where the whitespace bug got in.
+    """
+
+    def test_splits_on_commas(self) -> None:
+        assert _parse_sub_projects("packages,apps") == ["packages", "apps"]
+
+    def test_strips_whitespace_around_segments(self) -> None:
+        """`--sub-projects "packages, apps"` is what a person writes.
+
+        Unstripped, " apps" resolved to nothing and was skipped — while the
+        startup line echoed the raw string back, reporting both and indexing
+        one.
+        """
+        assert _parse_sub_projects("packages, apps") == ["packages", "apps"]
+        assert _parse_sub_projects(" packages ,\tapps\n") == ["packages", "apps"]
+
+    def test_drops_empty_segments(self) -> None:
+        assert _parse_sub_projects("packages,,apps,") == ["packages", "apps"]
+        assert _parse_sub_projects(" , ") == []
+
+    def test_absent_or_empty_yields_nothing(self) -> None:
+        assert _parse_sub_projects(None) == []
+        assert _parse_sub_projects("") == []
+
+    def test_a_single_value_needs_no_comma(self) -> None:
+        assert _parse_sub_projects("workspace") == ["workspace"]

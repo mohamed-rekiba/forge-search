@@ -96,6 +96,12 @@ def _sub_project_roots(root: Root, sub_project_dirs: Sequence[str]) -> list[Root
     before that check even runs.
     """
     found: list[Root] = []
+    # Two named directories can resolve to the same place — `workspace` twice,
+    # or `workspace` and `./workspace`. Yielding a checkout twice would index
+    # it twice and report a count nobody can reconcile with the tree, so the
+    # same resolved path is taken once. This is repetition, not the ambiguity
+    # `_reject_duplicate_labels` raises on: there is exactly one right answer.
+    seen: set[Path] = set()
     for rel in sub_project_dirs:
         base = (root.path / rel).resolve()
         if not base.is_dir():
@@ -107,6 +113,10 @@ def _sub_project_roots(root: Root, sub_project_dirs: Sequence[str]) -> list[Root
                 continue
             if not (entry / ".git").exists():
                 continue
+            resolved_entry = entry.resolve()
+            if resolved_entry in seen:
+                continue
+            seen.add(resolved_entry)
             found.append(Root(label=entry.name, path=entry))
     return found
 
@@ -172,4 +182,34 @@ def resolve_roots(
         resolved.extend(expanded)
         expansions.append((root.label, len(expanded)))
 
+    _reject_duplicate_labels(resolved)
     return Resolution(tuple(resolved), tuple(expansions))
+
+
+def _reject_duplicate_labels(roots: Sequence[Root]) -> None:
+    """Fail loudly when two roots share a label.
+
+    Indexes are keyed by label, so a second root with a label already taken
+    silently reuses the first one's index: the tree is resolved, printed at
+    startup, and returns nothing of its own. `core/cache.py` already defends
+    this on disk by hashing the path into shared-directory filenames; nothing
+    defended it at resolution, because until sub-project expansion every label
+    was either stated by the caller or came from one flat list of unique names.
+
+    Expansion makes collisions easy and ordinary: `--sub-projects
+    packages,apps` with a `foo` under each — the help text's own example
+    shape — or a checkout whose name matches its own root's label. Raising
+    names both paths, because "foo is ambiguous" without them just sends the
+    reader looking.
+    """
+    seen: dict[str, Path] = {}
+    for root in roots:
+        first = seen.get(root.label)
+        if first is not None and first != root.path:
+            raise ValueError(
+                f"duplicate root label {root.label!r}: {first} and {root.path}. "
+                "Labels key the indexes, so the second would silently reuse the "
+                "first's. Rename a directory, or name the roots explicitly with "
+                "--root label=path."
+            )
+        seen[root.label] = root.path

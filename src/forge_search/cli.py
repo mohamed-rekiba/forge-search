@@ -67,10 +67,17 @@ def _parse_sub_projects(raw: str | None) -> list[str]:
     comma-splitting is the whole cost of supporting more than one now. Empty
     segments (a trailing comma, an empty flag value) are dropped rather than
     yielding a directory named "".
+
+    Segments are stripped. `--sub-projects "packages, apps"` is what a person
+    writes, and without this the second becomes a directory named " apps",
+    which resolves to nothing and is skipped — while the startup line still
+    echoes the raw string back, reporting both and indexing one. Silent, and
+    actively reassuring, which is the shape of failure this project exists to
+    remove.
     """
     if not raw:
         return []
-    return [part for part in raw.split(",") if part]
+    return [stripped for part in raw.split(",") if (stripped := part.strip())]
 
 
 def _names_the_workspace(path_str: str, prefix: str) -> bool:
@@ -164,10 +171,18 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
     Guessing was removed because the caller already knows the answer, and
     guessing wrongly is silent.
     """
-    resolution = resolve_roots(
-        _explicit_roots(args),
-        sub_projects=_parse_sub_projects(getattr(args, "sub_projects", None)),
-    )
+    try:
+        resolution = resolve_roots(
+            _explicit_roots(args),
+            sub_projects=_parse_sub_projects(getattr(args, "sub_projects", None)),
+        )
+    except ValueError as exc:
+        # A colliding label is a caller mistake — two directories with the same
+        # name — so it gets the same clean one-line exit every other bad-input
+        # path here gets. Core raises rather than exiting because core is also
+        # a library; turning that into a message is this boundary's job. A
+        # traceback would bury the one sentence that says which two paths clash.
+        raise SystemExit(str(exc)) from exc
     # The resolved set matters — a wrong root means every later search returns
     # plausible results from the wrong tree — but WHERE it is reported depends
     # on the transport.
