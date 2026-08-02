@@ -189,7 +189,7 @@ class TestDuplicateLabels:
             )
 
     def test_the_error_names_both_paths(self, tmp_path: Path) -> None:
-        """"foo is ambiguous" without them just sends the reader looking."""
+        """ "foo is ambiguous" without them just sends the reader looking."""
         _checkout(tmp_path / "root" / "packages", "foo")
         _checkout(tmp_path / "root" / "apps", "foo")
 
@@ -203,9 +203,7 @@ class TestDuplicateLabels:
         assert "packages/foo" in message
         assert "apps/foo" in message
 
-    def test_a_checkout_colliding_with_its_own_root_raises(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_checkout_colliding_with_its_own_root_raises(self, tmp_path: Path) -> None:
         _checkout(tmp_path / "root" / "workspace", "r")
 
         with pytest.raises(ValueError, match="duplicate root label 'r'"):

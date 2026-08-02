@@ -349,9 +349,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     sub_projects = _parse_sub_projects(getattr(args, "sub_projects", None))
 
     def _reresolve() -> list[Root]:
-        return list(
-            resolve_roots(_explicit_roots(args), sub_projects=sub_projects).roots
-        )
+        return list(resolve_roots(_explicit_roots(args), sub_projects=sub_projects).roots)
 
     search = ForgeSearch(
         roots=roots,
