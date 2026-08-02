@@ -46,7 +46,7 @@ flowchart TD
 
     subgraph core["core/ — generic, knows nothing about any integration"]
         direction TB
-        roots["roots<br/>explicit roots + the RootProvider seam"]
+        roots["roots<br/>explicit roots + --sub-projects expansion"]
         traversal["traversal<br/>which files exist, and their excerpts"]
         cache["cache<br/>where an index file lives"]
         index["index<br/>FTS5 content + filename matching"]
@@ -60,8 +60,6 @@ flowchart TD
         bench["bench<br/>the measurement that judges it all"]
     end
 
-    adapters["adapters/<br/><i>integration-specific root expanders</i>"]
-
     cli --> server
     cli --> hybrid
     server --> hybrid
@@ -74,47 +72,38 @@ flowchart TD
     index --> query
     semantic --> embedding
     semantic --> traversal
-    adapters -.->|"implements RootProvider"| roots
     cli --> roots
-
-    style adapters stroke-dasharray: 4 4
 ```
 
-Two rules hold this shape:
-
-**`core/` never imports `adapters/`.** The dependency points one way. A test
-asserts it, by checking imports rather than word occurrences, because the
-first version of that test passed while a `core/` docstring cheerfully
-mentioned `--adapter apexyard`.
+One rule holds this shape:
 
 **`hybrid` composes the arms so neither imports the other.** `index` knows
 nothing about embeddings; `semantic` knows nothing about FTS5. Either can be
 absent — a lexical-only install never imports `semantic` at all — and the
 composition layer is the only place that has to care.
 
-## The adapter seam
+## Sub-project expansion
 
-An adapter is a root **expander**, not a root discoverer. It receives a root
-the caller already named, decides whether it understands that shape of tree,
-and if so expands it into the several labelled roots it really contains.
+`--sub-projects` turns one named root into the several roots it really
+contains. A directory named by the flag is resolved relative to the root,
+scanned for checkouts — anything containing `.git` — and each one becomes an
+additional labelled `Root`.
 
 ```python
-class RootProvider:
-    name: str = ""  # what `--adapter <name>` selects
-    index_dir: str | None = None  # optionally moves the default index location
-
-    def expand(self, root: Root) -> Sequence[Root]:
-        return [root]
+def resolve_roots(
+    given: Iterable[Root],
+    *,
+    sub_projects: Sequence[str] = (),
+) -> Resolution: ...
 ```
 
-That is the entire interface. It is narrow on purpose: anything wider lets
-integration concepts into the core, at which point "works standalone" becomes
-a claim in a README rather than a property of the code.
-
-**Adapters are named, never detected.** An adapter that enables itself because
-it spotted a marker file can fire when you did not want it and stay silent
-when you did — both invisibly. Naming it costs one flag and removes the
-failure class entirely. See [decisions.md](decisions.md#nothing-is-discovered).
+This used to be a `RootProvider` seam: a class the caller selected by name
+(`--adapter apexyard`), which read a portfolio's own config files to infer
+the same structure a flag now states directly. Removing that class is not
+core learning a new trick — it is core doing what it already claimed to do
+("everything explicit, nothing discovered") without the one exception that
+contradicted it. See [decisions.md](decisions.md#nothing-is-discovered) and
+the entry recording the seam's removal.
 
 ## Startup
 
@@ -124,9 +113,9 @@ sequenceDiagram
     participant S as forge-search
     participant D as Disk
 
-    C->>S: spawn — forge-search serve --root PATH [--adapter NAME]
-    S->>S: resolve roots — explicit, adapter may expand
-    S-->>C: stderr — roots: LABEL=PATH  adapter: NAME
+    C->>S: spawn — forge-search serve --root PATH [--sub-projects DIR]
+    S->>S: resolve roots — explicit, --sub-projects may expand
+    S-->>C: stderr — roots: LABEL=PATH  LABEL expanded into N sub-project(s)
     C->>S: initialize
     S-->>C: capabilities (tools, logging)
     C->>S: notifications/initialized

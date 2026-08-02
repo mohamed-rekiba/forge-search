@@ -101,32 +101,30 @@ Add to `.mcp.json` in your project, with an **absolute path**:
 Tools appear as `mcp__forge-search__search_code`, `…__search_docs`, and
 `…__reindex`.
 
-For an apexyard fork, point one server at the portfolio instead of a single
-project. `--adapter apexyard` reads the roots from `apexyard.projects.yaml`, and
-`--name` sets the tool prefix:
+To point one server at a tree that holds several projects — a monorepo, a
+portfolio of clones — add `--sub-projects` and `--name` sets the tool prefix:
 
 ```json
 {
   "mcpServers": {
-    "apexyard-search": {
+    "portfolio-search": {
       "type": "stdio",
       "command": "forge-search",
       "args": [
-        "serve", "--root", "/absolute/path/to/your/apexyard/fork", "--semantic",
-        "--name", "apexyard-search", "--adapter", "apexyard"
+        "serve", "--root", "/absolute/path/to/the/parent/repo", "--semantic",
+        "--name", "portfolio-search", "--sub-projects", "workspace"
       ]
     }
   }
 }
 ```
 
-The root must be the ops fork itself. The adapter starts there to find the
-registry, whether it sits in the fork or, in split-portfolio mode, in the private
-sibling repo the fork's config points at. Give it as an absolute path: a relative
-one resolves against the client's
-working directory, and when the adapter finds no registry there it falls back to
-treating that directory as a single root — which searches successfully and
-silently omits the rest of the portfolio.
+Every checkout under `workspace/` (resolved relative to the root, so it can
+also point outside it, e.g. `../portfolio/workspace`) becomes its own labelled
+root, named by directory. Give the root as an absolute path: a relative one
+resolves against the client's working directory, and a named sub-projects
+directory that does not exist is not an error — the root is still searched,
+just without that expansion.
 
 A project registered after the server started does not need a restart. The first
 request naming it re-resolves the root set, and it stays visible for
@@ -198,10 +196,10 @@ you cannot write to. Details: [docs/indexing.md](docs/indexing.md).
 
 | Document | What's in it |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | How the pieces fit, the module map, the adapter seam |
+| [docs/architecture.md](docs/architecture.md) | How the pieces fit, the module map |
 | [docs/indexing.md](docs/indexing.md) | Traversal, schema, freshness, chunking, staleness guards |
 | [docs/searching.md](docs/searching.md) | The two arms, fusion, reranking, query syntax, the tools |
-| [docs/configuration.md](docs/configuration.md) | Every flag, index location, adapters, transports |
+| [docs/configuration.md](docs/configuration.md) | Every flag, index location, sub-projects, transports |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Real failures and what caused them |
 | [docs/decisions.md](docs/decisions.md) | Why it is shaped this way, including reversals |
 | [BENCHMARK.md](BENCHMARK.md) | Numbers, method, and honest limits |

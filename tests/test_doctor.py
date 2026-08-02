@@ -245,45 +245,6 @@ class TestReport:
         )
         assert "files indexed" in out
 
-    def test_honours_an_adapter_supplied_index_dir(
-        self,
-        root: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """The same bug as `--index-dir`, one precedence tier down.
-
-        `_index_dir` has three tiers: explicit flag, then the active adapter's
-        preference, then the per-root default. The middle tier reads
-        `_LAST_RESOLUTION`, which only `_resolve_roots` populates — so calling
-        `_index_dir` *before* `_resolve_roots` silently skips it and doctor looks
-        in the default location. Latent with the shipped adapter only because it
-        leaves `index_dir` unset.
-        """
-        from forge_search import cli
-        from forge_search.core.roots import Resolution, Root
-
-        main(["index", "--root", str(root), "--index-dir", "custom_idx"])
-        capsys.readouterr()
-
-        # Stand in for an adapter that moves the default. Patching the resolver
-        # rather than `_LAST_RESOLUTION` directly is what makes this a real test
-        # of the ordering: `_resolve_roots` overwrites that slot on every run, so
-        # presetting it proves nothing.
-        def _resolution_with_index_dir(explicit, **kwargs):
-            return Resolution(
-                roots=(Root(label="proj", path=root),), index_dir="custom_idx"
-            )
-
-        monkeypatch.setattr(cli, "resolve_roots", _resolution_with_index_dir)
-        main(["doctor", "--root", str(root)])
-        out = capsys.readouterr().out
-
-        assert "no index yet" not in out, (
-            "doctor ignored the adapter's index_dir preference and looked in the "
-            "default location, reporting an indexed root as unindexed"
-        )
-
     def test_reports_staleness(
         self, root: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

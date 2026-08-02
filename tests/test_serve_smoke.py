@@ -169,7 +169,11 @@ def test_config_is_announced_as_info_not_a_stderr_warning(project):
     # Where the startup line went. stderr would arrive as `[warning]` in the
     # client log, so a healthy launch would always look like a problem;
     # notifications/message carries a level, so this arrives as information.
-    client = Client("--root", str(project), "--adapter", "apexyard", cwd=str(project))
+    (project / "workspace" / "sub").mkdir(parents=True)
+    (project / "workspace" / "sub" / ".git").mkdir()
+    client = Client(
+        "--root", str(project), "--sub-projects", "workspace", cwd=str(project)
+    )
     try:
         client.handshake()
         client.call("search_code", query="tokens", top_k=5)
@@ -182,7 +186,7 @@ def test_config_is_announced_as_info_not_a_stderr_warning(project):
     assert logs[0]["params"]["level"] == "info"
     text = logs[0]["params"]["data"]
     assert str(project) in text
-    assert "adapter: apexyard" in text
+    assert "expanded into 1 sub-project(s)" in text
     assert "forge-search: roots:" in err
 
 

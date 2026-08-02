@@ -35,7 +35,7 @@ from .core.index import LexicalIndex, inspect_index
 from .core.model import download, is_present, model_dir, resolve_model, resolve_reranker
 from .core.query import QueryError
 from .core.rerank import CrossEncoderReranker
-from .core.roots import Resolution, Root, RootProvider, resolve_roots
+from .core.roots import Resolution, Root, resolve_roots
 from .core.server import DEFAULT_SERVER_NAME, ForgeSearch
 
 __all__ = ["main"]
@@ -59,21 +59,18 @@ _CURRENT_WORKSPACE = ["${workspaceFolder}"]
 _UNEXPANDED = re.compile(r"\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*")
 
 
-def _providers() -> list[RootProvider]:
-    """Root providers available in this installation.
+def _parse_sub_projects(raw: str | None) -> list[str]:
+    """Split `--sub-projects=a,b` into `["a", "b"]`.
 
-    Import failures are swallowed on purpose: an integration adapter is
-    optional by definition, and a standalone install must not require one to
-    be importable.
+    A list from the start, not a scalar promoted to one later: a
+    scalar-to-list change would be a second breaking CLI change, so
+    comma-splitting is the whole cost of supporting more than one now. Empty
+    segments (a trailing comma, an empty flag value) are dropped rather than
+    yielding a directory named "".
     """
-    found: list[RootProvider] = []
-    try:
-        from .adapters.apexyard import ApexyardRootProvider
-    except ImportError:  # pragma: no cover - adapter is optional
-        pass
-    else:
-        found.append(ApexyardRootProvider())
-    return found
+    if not raw:
+        return []
+    return [part for part in raw.split(",") if part]
 
 
 def _names_the_workspace(path_str: str, prefix: str) -> bool:
@@ -95,13 +92,14 @@ def _names_the_workspace(path_str: str, prefix: str) -> bool:
 
 
 def _explicit_roots(args: argparse.Namespace) -> list[Root]:
-    """The roots the caller named, before any adapter expansion.
+    """The roots the caller named, before any `--sub-projects` expansion.
 
     Parsing lives here, apart from `_resolve_roots`, so it can be re-run: the
     `serve` command hands a closure over this to the server, which calls it to
     re-resolve roots when a project registered after startup is first named
     (see ForgeSearch.root_resolver). The caller's `--root` set does not change,
-    but the adapter re-reads its registry each time, so a new clone appears.
+    but each named sub-projects directory is re-scanned every call, so a clone
+    that appeared since startup is picked up.
     """
     if not args.root:
         raise SystemExit(
@@ -168,8 +166,7 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
     """
     resolution = resolve_roots(
         _explicit_roots(args),
-        adapters=_providers(),
-        adapter_name=getattr(args, "adapter", None),
+        sub_projects=_parse_sub_projects(getattr(args, "sub_projects", None)),
     )
     # The resolved set matters — a wrong root means every later search returns
     # plausible results from the wrong tree — but WHERE it is reported depends
@@ -193,16 +190,13 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
 
 
 def _index_dir(args: argparse.Namespace) -> str | None:
-    """Where indexes go, most explicit wins.
+    """Where indexes go: `--index-dir` if given, else `.forge_search` per root.
 
-    `--index-dir` > the active adapter's preference > `.forge_search` per
-    root. The adapter only moves the default, because it knows the shape of
-    the tree it expanded; it never overrides something the caller stated.
+    Used to have a middle tier here — an adapter could move the default for a
+    tree shape it understood. With no adapters, nothing supplies that
+    preference any more, so the explicit flag is the only override left.
     """
-    explicit = getattr(args, "index_dir", None)
-    if explicit:
-        return explicit
-    return _LAST_RESOLUTION.index_dir if _LAST_RESOLUTION else None
+    return getattr(args, "index_dir", None)
 
 
 def _embedder(args: argparse.Namespace):
@@ -332,19 +326,16 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     resolution = _LAST_RESOLUTION
 
     # Re-resolve on demand so a project registered after the server started is
-    # found without a restart. The adapter re-reads its registry on each
-    # expand(), so re-running resolution with the same `--root` picks up new
-    # clones. Kept quiet — this fires mid-session, and its stderr would be
-    # rendered as a spurious `[warning]` by the client on every discovery.
-    adapter_name = getattr(args, "adapter", None)
+    # found without a restart. Each named sub-projects directory is re-scanned
+    # on every call, so re-running resolution with the same `--root` picks up
+    # a clone that appeared since startup. Kept quiet — this fires mid-session,
+    # and its stderr would be rendered as a spurious `[warning]` by the client
+    # on every discovery.
+    sub_projects = _parse_sub_projects(getattr(args, "sub_projects", None))
 
     def _reresolve() -> list[Root]:
         return list(
-            resolve_roots(
-                _explicit_roots(args),
-                adapters=_providers(),
-                adapter_name=adapter_name,
-            ).roots
+            resolve_roots(_explicit_roots(args), sub_projects=sub_projects).roots
         )
 
     search = ForgeSearch(
@@ -491,14 +482,14 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     """
     print(f"semantic arm: {_semantic_status()}")
 
-    # Roots first: `_index_dir`'s middle precedence tier reads the resolution
-    # that `_resolve_roots` populates, so resolving after it would silently skip
-    # an adapter's index_dir preference and look in the default location.
     roots = _resolve_roots(args)
     index_dir = _index_dir(args)
 
-    adapter = getattr(args, "adapter", None)
-    print(f"roots: {len(roots)}" + (f" (adapter: {adapter})" if adapter else ""))
+    sub_projects = getattr(args, "sub_projects", None)
+    print(
+        f"roots: {len(roots)}"
+        + (f" (sub-projects: {sub_projects})" if sub_projects else "")
+    )
 
     problems = 0
     for root in roots:
@@ -534,8 +525,6 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def _cmd_search(args: argparse.Namespace) -> int:
-    # Roots before `_index_dir`, so the adapter tier of that lookup can see the
-    # resolution — same ordering `doctor` needs, for the same reason.
     roots = _resolve_roots(args)
     search = ForgeSearch(
         roots=roots, embedder=_embedder(args), index_dir=_index_dir(args)
@@ -590,9 +579,13 @@ def _add_root_args(parser: argparse.ArgumentParser) -> None:
         help="A directory to index, [LABEL=]PATH. Required. Repeatable.",
     )
     parser.add_argument(
-        "--adapter",
-        metavar="NAME",
-        help="Force a portfolio adapter (e.g. apexyard) instead of detecting it.",
+        "--sub-projects",
+        metavar="DIR[,DIR...]",
+        help=(
+            "Directories under a root, resolved relative to it, whose "
+            "checkouts (anything containing .git) become additional "
+            "labelled roots. Comma-separated for more than one."
+        ),
     )
 
 
