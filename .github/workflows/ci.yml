@@ -122,7 +122,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
           ignore-nothing-to-cache: true
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: coverage-*
           merge-multiple: true
