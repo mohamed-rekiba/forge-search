@@ -98,6 +98,59 @@ def _names_the_workspace(path_str: str, prefix: str) -> bool:
     return path_str[len(prefix)] in (os.sep, os.altsep or os.sep)
 
 
+#: Roots stated in the environment, for callers that cannot pass flags --
+#: an MCP client config, a shell hook. `os.pathsep`-separated, each entry the
+#: same `[label=]path` form `--root` takes.
+ENV_ROOTS = "FORGE_SEARCH_ROOTS"
+
+#: Read as aliases, in this order, when ENV_ROOTS is unset. They belong to
+#: apexyard, not to this project, and are honoured because apexyard's config
+#: validator requires both to be present and to point at real directories:
+#: requiring them in the config while ignoring them at runtime would leave a
+#: reader with two plausible beliefs about which tree is searched and no way to
+#: tell which is true. The label comes from the variable rather than the
+#: directory basename, so `--project ops` means what it says.
+ALIAS_ROOTS: tuple[tuple[str, str], ...] = (
+    ("APEXYARD_OPS_ROOT", "ops"),
+    ("APEXYARD_PORTFOLIO_ROOT", "portfolio"),
+)
+
+
+def _roots_from_env() -> tuple[list[str], str]:
+    """Root specs stated in the environment, and which variable stated them.
+
+    One source at a time: the native variable wins outright rather than being
+    merged with the aliases, so a reader never has to work out the union of two
+    settings to know what is searched.
+
+    Every variable here is **optional**, and a stale one is skipped rather than
+    fatal. The aliases in particular are another product's; refusing to start
+    because a variable this project does not own points somewhere that no
+    longer exists would turn a courtesy into a dependency. Skipped is not
+    silent, though -- the warning names the variable, so a config that has
+    drifted stays visible to whoever has to fix it.
+    """
+    raw = os.environ.get(ENV_ROOTS, "").strip()
+    if raw:
+        return [s for s in raw.split(os.pathsep) if s.strip()], ENV_ROOTS
+
+    specs: list[str] = []
+    used: list[str] = []
+    for var, label in ALIAS_ROOTS:
+        value = os.environ.get(var, "").strip()
+        if not value:
+            continue
+        if not Path(value).is_dir():
+            print(
+                f"{var} is set to {value!r}, which is not a directory — ignoring it.",
+                file=sys.stderr,
+            )
+            continue
+        specs.append(f"{label}={value}")
+        used.append(var)
+    return specs, ", ".join(used)
+
+
 def _explicit_roots(args: argparse.Namespace) -> list[Root]:
     """The roots the caller named, before any `--sub-projects` expansion.
 
@@ -108,6 +161,16 @@ def _explicit_roots(args: argparse.Namespace) -> list[Root]:
     but each named sub-projects directory is re-scanned every call, so a clone
     that appeared since startup is picked up.
     """
+    if not args.root:
+        env_specs, source = _roots_from_env()
+        if env_specs:
+            # A variable is the caller stating which tree they mean, exactly as
+            # a flag is -- so this is not the guess below and is not announced
+            # as one. Which variable supplied it is named, because that is the
+            # first thing to check when the wrong tree turns up.
+            print(f"roots from {source}", file=sys.stderr)
+            args.root = env_specs
+
     if not args.root:
         # Fall back to the working directory, and SAY SO.
         #
