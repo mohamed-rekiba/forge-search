@@ -762,7 +762,14 @@ def _add_root_args(parser: argparse.ArgumentParser) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="forge-search",
-        description="Local code and docs search over one or many repositories.",
+        # The version belongs in the help, not only behind a flag you have to
+        # know exists. `--version` answers "which build" once you already
+        # suspect a version problem; this answers it while you are reading.
+        description=(
+            "Local code and docs search over one or many repositories.\n"
+            f"version {__version__}"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     # "Which build is this" is the first question when a result set looks
     # wrong, when an MCP client and a shell disagree about what is installed,
@@ -774,7 +781,12 @@ def main(argv: list[str] | None = None) -> int:
         version=f"forge-search {__version__}",
         help="Print the version and exit",
     )
-    sub = parser.add_subparsers(dest="command", required=True)
+    # Not `required=True`. Running the bare command is someone asking what
+    # this is, and argparse answers that with "error: the following arguments
+    # are required: command" on stderr and exit 2 — which tells them they did
+    # something wrong instead of what they can do. The empty case is handled
+    # below; a *wrong* command still fails, because that is a different thing.
+    sub = parser.add_subparsers(dest="command")
 
     serve = sub.add_parser("serve", help="Run the MCP server")
     _add_root_args(serve)
@@ -920,6 +932,14 @@ def main(argv: list[str] | None = None) -> int:
     bench.set_defaults(func=_cmd_bench)
 
     args = parser.parse_args(argv)
+
+    if args.command is None:
+        # stdout and exit 0: this is an answer, not a complaint, and it should
+        # survive being piped into a pager without the shell calling it a
+        # failure.
+        parser.print_help()
+        raise SystemExit(0)
+
     try:
         return int(args.func(args))
     except KeyboardInterrupt:

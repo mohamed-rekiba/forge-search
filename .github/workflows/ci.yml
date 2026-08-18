@@ -22,6 +22,32 @@ env:
   UV_VERSION: "0.12.0"
 
 jobs:
+  lockfile:
+    # The one --locked check in the repo. Every other job runs a plain
+    # `uv sync`, which REWRITES uv.lock rather than verifying it, so drift
+    # between pyproject.toml and the lock passed CI unnoticed and was caught
+    # only at release time, by a script pushing a fixup onto the release PR.
+    #
+    # A CI check was rejected before for a reason that no longer holds: the
+    # release PR used to change uv.lock itself (the version was static and
+    # recorded in it), so a check that never runs on that PR could not see the
+    # drift it introduced. The version is dynamic now and uv records none, so a
+    # release PR touches CHANGELOG, the manifest and __init__.py only — the
+    # lock it ships is byte-for-byte the one this job verified on main.
+    name: Lockfile
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          ignore-nothing-to-cache: true
+      # --all-extras because the semantic extra carries four of the five
+      # declared dependencies; the base install alone leaves them unchecked.
+      - run: uv sync --locked --all-extras
+
   lint:
     name: Lint & Format
     runs-on: ubuntu-24.04
