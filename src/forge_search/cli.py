@@ -125,8 +125,7 @@ def _explicit_roots(args: argparse.Namespace) -> list[Root]:
         # as "search is unavailable" rather than as "you forgot a flag".
         cwd = Path.cwd().resolve()
         print(
-            f"no --root given; using the working directory: {cwd}\n"
-            "  pass --root /absolute/path to search a different project.",
+            f"no --root given; using the working directory: {cwd}\n",
             file=sys.stderr,
         )
         args.root = [str(cwd)]
@@ -220,9 +219,9 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
 def _index_dir(args: argparse.Namespace) -> str | None:
     """Where indexes go: `--index-dir` if given, else `.forge_search` per root.
 
-    Used to have a middle tier here — an adapter could move the default for a
-    tree shape it understood. With no adapters, nothing supplies that
-    preference any more, so the explicit flag is the only override left.
+    Used to have a middle tier here, where a component that recognised a tree
+    shape could move the default. Nothing supplies that preference any more, so
+    the explicit flag is the only override left.
     """
     return getattr(args, "index_dir", None)
 

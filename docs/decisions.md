@@ -39,8 +39,8 @@ rather than trying to be precise.
 
 ## Nothing is discovered
 
-Roots are named explicitly. Adapters are named explicitly. There is no
-walk-up, no cwd inference, no marker sniffing, no fallback guess.
+Roots are named explicitly. There is no walk-up, no cwd inference, no marker
+sniffing, no fallback guess.
 
 **Reversed once.** The original justification was "your editor substitutes the
 project path at launch, so inferring it solves a solved problem." Half of that
@@ -54,7 +54,7 @@ somewhere else. A wrong *absolute path* fails at startup with a message. The
 honest cost, which the first version waved away: an absolute path makes a
 shared `.mcp.json` per-machine.
 
-Detection has the same flaw as guessing. An adapter that enables itself
+Detection has the same flaw as guessing. Anything that switches itself on
 because it spotted a marker file can fire when unwanted and stay silent when
 wanted, both invisibly. Naming it costs one flag and removes the class.
 
@@ -332,11 +332,13 @@ runs on a release PR, so a check there cannot see release-time drift. It would
 catch the case where someone hand-edits `pyproject.toml` in an ordinary PR, which
 is a different and much rarer problem.
 
-## Sub-projects replace the adapter seam
+## Sub-projects, not a plugin seam
 
-`RootProvider` is gone. Its own docstring said the seam existed to supply
-"the part a caller genuinely cannot supply: knowing that one root is a
-portfolio containing several projects, and what each should be called." That
+There is no plugin point for teaching the tool about a tree shape. There was
+one briefly, and `RootProvider` is gone. Its own docstring said the seam
+existed to supply "the part a caller genuinely cannot supply: knowing that one
+root is a portfolio containing several projects, and what each should be
+called." That
 was never true. The one shipped implementation read a portfolio's own
 `apexyard.projects.yaml` to answer a question the caller already knew the
 answer to. `--sub-projects <dir>[,<dir>...]` states it instead: each
@@ -344,7 +346,7 @@ directory, resolved relative to the root, is scanned for checkouts, and each
 one becomes a labelled root.
 
 This makes `core/roots.py` **more** faithful to "Nothing is discovered," not
-less. The adapter was the one place in the module that read a project's own
+less. That seam was the one place in the module that read a project's own
 config to infer structure — every guess this file refuses to make elsewhere,
 it was still making, once, for exactly the caller who most needed the module
 to mean what it said. With the flag, the root and its sub-project
@@ -358,23 +360,21 @@ directory. `git worktree add` produces a `.git` that is a *file* — a
 plain clone. Silent and one-sided is exactly the failure class this project
 exists to catch, so the guard tests existence, not shape.
 
-**Removing `--adapter` is a breaking change, with no compatibility alias.** An
+**Removing the seam is a breaking change, with no compatibility alias.** An
 alias would keep `RootProvider`'s shape alive under another name, for a
 second implementation that has never existed and that a flag does not need —
 exactly the speculative extension point this change exists to remove.
 Pre-1.0 projects are entitled to break on a minor, and this one does.
 
-**What this gives up:** the adapter's one behaviour `--sub-projects` does not
-reproduce is registry-driven opt-in — only *registered* projects with a local
+**What this gives up:** the one behaviour `--sub-projects` does not reproduce
+is registry-driven opt-in — only *registered* projects with a local
 clone were ever expanded. `--sub-projects` expands every checkout it finds
 under the named directory, registered or not. Naming the directory is still
 an explicit act; what turns up inside it is no longer filtered against
 anything else.
 
-Corrects a line in ["Nothing is discovered"](#nothing-is-discovered) above:
-"Adapters are named explicitly" described a component that no longer exists.
-The principle it was defending — nothing here infers what the caller can
-state directly — is what motivated removing it.
+The principle this defends — nothing here infers what the caller can state
+directly — is what motivated the removal.
 
 ---
 

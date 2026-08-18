@@ -97,9 +97,9 @@ def resolve_roots(
 ) -> Resolution: ...
 ```
 
-This used to be a `RootProvider` seam: a class the caller selected by name
-(`--adapter apexyard`), which read a portfolio's own config files to infer
-the same structure a flag now states directly. Removing that class is not
+This used to be a `RootProvider` seam: a class the caller selected by name,
+which read a portfolio's own config files to infer the same structure a flag
+now states directly. Removing that class is not
 core learning a new trick — it is core doing what it already claimed to do
 ("everything explicit, nothing discovered") without the one exception that
 contradicted it. See [decisions.md](decisions.md#nothing-is-discovered) and
