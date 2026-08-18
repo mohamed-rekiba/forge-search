@@ -58,6 +58,29 @@ Detection has the same flaw as guessing. An adapter that enables itself
 because it spotted a marker file can fire when unwanted and stay silent when
 wanted, both invisibly. Naming it costs one flag and removes the class.
 
+**Amended: no `--root` falls back to the working directory, and announces it.**
+The hard failure had a cost this section never priced. Callers that run
+`doctor` or `reindex` unattended from inside a project — shell hooks,
+session-start probes — pass no `--root` at all, and read the non-zero exit as
+"search is unavailable" rather than "you forgot a flag". The whole point of
+`doctor` is to distinguish a broken install from a stale index, and it was
+answering "broken" for a correct one.
+
+The objection above survives intact, because it was never about the fallback:
+it was about *silence*. "A wrong guess is silent" — so this guess is not. Every
+implicit root prints the absolute path it resolved, on stderr, before anything
+is indexed. A stated default can be checked against the tree the caller meant;
+that is the entire difference, and it is what the earlier reversal was really
+defending.
+
+`serve` is excluded and still refuses. A server's root is written once into an
+MCP client config, where naming it costs nothing, and a wrong one is not a
+wrong answer but a wrong answer for the whole session, to every caller,
+invisibly — which is the case this rule was really written for. The fallback is
+for one-shot commands run from inside a project.
+
+Explicit roots are untouched, and remain the recommendation.
+
 ## Indexes live in the tree
 
 `<root>/.forge_search/` by default.

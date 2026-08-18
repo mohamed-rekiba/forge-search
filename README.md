@@ -180,6 +180,62 @@ Responses carry `degraded` (roots that could not be read — reported, never
 dropped, so a partial answer never looks complete) and `reindexed` (roots
 refreshed during the call).
 
+## Using it as `apexyard-search`
+
+[apexyard](https://github.com/me2resh/apexyard) drives a search server it calls
+`apexyard-search`: its agent definitions declare
+`mcp__apexyard-search__search_code` / `…__search_docs` in `allowed-tools`, and
+its session-start hook shells out to a binary of that name. forge-search can
+serve that role, but it ships only one console script — `forge-search` — so the
+name has to be provided.
+
+Link it next to the installed binary:
+
+```bash
+t=$(which forge-search)
+cd "${t%/*}"
+ln -s forge-search apexyard-search
+```
+
+Then register the server under the matching name, so the tools resolve as
+`mcp__apexyard-search__*`:
+
+```json
+{
+  "mcpServers": {
+    "apexyard-search": {
+      "type": "stdio",
+      "command": "apexyard-search",
+      "args": [
+        "serve", "--root", "/absolute/path/to/portfolio", "--semantic",
+        "--name", "apexyard-search", "--sub-projects", "workspace"
+      ],
+      "env": {
+        "APEXYARD_OPS_ROOT": "/absolute/path/to/ops",
+        "APEXYARD_PORTFOLIO_ROOT": "/absolute/path/to/portfolio"
+      }
+    }
+  }
+}
+```
+
+The two `env` keys are apexyard's, not forge-search's — nothing here reads
+them — but apexyard's `validate-search-config.sh` requires both to be present
+and to point at directories that exist, and reports the config broken
+otherwise.
+
+Two notes on the fit:
+
+- **`--adapter apexyard` no longer exists.** It read a portfolio's
+  `apexyard.projects.yaml` to infer its projects; `--sub-projects` states them
+  instead. See [docs/decisions.md](docs/decisions.md).
+- **The session-start hook passes no `--root`.** It runs `apexyard-search
+  doctor` and `apexyard-search reindex --incremental --if-stale=<seconds>` from
+  inside the project, so both fall back to the working directory and announce
+  the path they chose. `serve` is deliberately not part of that: a server's
+  root is named once in the config above, and a wrong one would be wrong for
+  the whole session rather than for one command.
+
 ## Indexes
 
 One SQLite file per root, in `<root>/.forge_search/`, beside the code so it

@@ -108,15 +108,43 @@ def _explicit_roots(args: argparse.Namespace) -> list[Root]:
     but each named sub-projects directory is re-scanned every call, so a clone
     that appeared since startup is picked up.
     """
-    if not args.root:
+    if not args.root and getattr(args, "strict_root", False):
+        # `serve` still refuses. The fallback below is for one-shot commands
+        # run from inside a project; a long-lived server is the opposite case.
+        # Its root is written once into an MCP client config, where naming it
+        # costs nothing, and a wrong one is not a wrong answer but a wrong
+        # answer for the whole session, to every caller, invisibly.
         raise SystemExit(
-            "no --root given. forge-search does not guess which project you "
-            "mean.\n"
+            "no --root given. forge-search does not guess which project a "
+            "server should host.\n"
             "  --root /absolute/path/to/project\n"
             "  --root myproject=/absolute/path        (labelled)\n"
             "\nUse an absolute path. `${workspaceFolder}` is a VS Code "
             "variable and is not expanded by every MCP client."
         )
+
+    if not args.root:
+        # Fall back to the working directory, and SAY SO.
+        #
+        # The recorded objection to inferring a root is that a wrong guess is
+        # *silent*: the wrong tree gets indexed and every later search returns
+        # plausible results from somewhere else, with nothing to look at. That
+        # objection is about the silence, not about the fallback -- so the
+        # fallback names the absolute path it resolved, on stderr, every time.
+        # A stated default can be checked against the tree the caller meant;
+        # a silent one cannot, and that is the whole of the difference.
+        #
+        # Hard-failing here instead is not free. Callers that run
+        # `doctor` / `reindex` unattended from inside a project -- shell hooks,
+        # session-start probes -- pass no `--root` at all, and read the failure
+        # as "search is unavailable" rather than as "you forgot a flag".
+        cwd = Path.cwd().resolve()
+        print(
+            f"no --root given; using the working directory: {cwd}\n"
+            "  pass --root /absolute/path to search a different project.",
+            file=sys.stderr,
+        )
+        args.root = [str(cwd)]
 
     explicit: list[Root] = []
     for raw in args.root:
@@ -668,7 +696,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Rerank results with a cross-encoder (needs `warm --reranker`)",
     )
-    serve.set_defaults(func=_cmd_serve)
+    serve.set_defaults(func=_cmd_serve, strict_root=True)
 
     index = sub.add_parser("index", help="Build or refresh indexes")
     _add_root_args(index)
