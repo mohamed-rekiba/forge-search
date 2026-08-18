@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/mohamed-rekiba/forge-search/compare/v1.1.0...v1.2.0) (2026-08-18)
+
+
+### Features
+
+* fall back to the working directory when no --root is given, audibly ([#59](https://github.com/mohamed-rekiba/forge-search/issues/59)) ([8c7858c](https://github.com/mohamed-rekiba/forge-search/commit/8c7858cc1f36cd1cf7ca23359b5ff759fb194f8e))
+
 ## [1.1.0](https://github.com/mohamed-rekiba/forge-search/compare/v1.0.1...v1.1.0) (2026-08-18)
 
 
