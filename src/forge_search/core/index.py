@@ -528,18 +528,25 @@ class LexicalIndex:
             "needle": needle,
             "suffixes": None if suffixes is None else json.dumps(sorted(suffixes)),
         }
-        where = (
-            "instr(lower(body), lower(:needle)) > 0 "
+        # Written out in full twice rather than composed from a shared
+        # fragment. The clause is constant either way, but an f-string puts
+        # something that *looks* caller-shaped into the SQL text, and neither
+        # a reader nor a scanner can tell at a glance that it is not. Two
+        # literal statements need no such argument.
+        total_chunks, total_files = self._conn.execute(
+            "SELECT count(*), count(DISTINCT relpath) FROM chunks "
+            "WHERE instr(lower(body), lower(:needle)) > 0 "
             "AND (:suffixes IS NULL OR EXISTS ("
             "SELECT 1 FROM json_each(:suffixes) "
-            "WHERE lower(relpath) GLOB '*' || value))"
-        )
-        total_chunks, total_files = self._conn.execute(
-            f"SELECT count(*), count(DISTINCT relpath) FROM chunks WHERE {where}",  # noqa: S608
+            "WHERE lower(relpath) GLOB '*' || value))",
             params,
         ).fetchone()
         rows = self._conn.execute(
-            f"SELECT relpath, count(*) AS n FROM chunks WHERE {where} "  # noqa: S608
+            "SELECT relpath, count(*) AS n FROM chunks "
+            "WHERE instr(lower(body), lower(:needle)) > 0 "
+            "AND (:suffixes IS NULL OR EXISTS ("
+            "SELECT 1 FROM json_each(:suffixes) "
+            "WHERE lower(relpath) GLOB '*' || value)) "
             "GROUP BY relpath ORDER BY n DESC, relpath LIMIT :file_limit",
             {**params, "file_limit": file_limit},
         ).fetchall()
