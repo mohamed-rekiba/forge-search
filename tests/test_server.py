@@ -57,7 +57,7 @@ class TestToolRegistration:
         names = {t.name for t in asyncio.run(mcp.list_tools())}
 
         assert mcp.name == "custom-name"
-        assert names == {"search_code", "search_docs", "reindex"}
+        assert names == {"search_code", "search_docs", "count_matches", "reindex"}
         fs.close()
 
     def test_query_is_the_only_required_argument(self, tmp_path: Path) -> None:
@@ -451,3 +451,58 @@ class TestResultCompleteness:
 
         assert len(result["results"]) == 5
         assert all(r["path"].endswith(".md") for r in result["results"])
+
+
+class TestCountMatchesTool:
+    """The enumeration path, at the server boundary."""
+
+    @pytest.fixture
+    def counted(self, tmp_path: Path):
+        alpha = tmp_path / "alpha"
+        alpha.mkdir()
+        (alpha / "a.py").write_text("needle_token = 1\nneedle_token = 2\n")
+        (alpha / "a.md").write_text("Prose mentioning needle_token once.\n")
+        beta = tmp_path / "beta"
+        beta.mkdir()
+        (beta / "b.py").write_text("needle_token\n")
+        fs = ForgeSearch(
+            roots=[Root(label="alpha", path=alpha), Root(label="beta", path=beta)]
+        )
+        yield fs
+        fs.close()
+
+    def test_totals_span_every_root(self, counted: ForgeSearch) -> None:
+        result = counted._count("needle_token", project=None, doc_only=False)
+
+        assert result["total_chunks"] == 4
+        assert result["total_files"] == 3
+        assert result["truncated"] is False
+        assert {f["project"] for f in result["files"]} == {"alpha", "beta"}
+
+    def test_doc_only_counts_only_prose(self, counted: ForgeSearch) -> None:
+        """The filter must reach the totals, not just the roster.
+
+        Counting the world and then listing a filtered subset would restate the
+        bug this whole path exists to close, one field over.
+        """
+        result = counted._count("needle_token", project=None, doc_only=True)
+
+        assert result["total_chunks"] == 1
+        assert result["total_files"] == 1
+        assert [f["path"] for f in result["files"]] == ["a.md"]
+
+    def test_absence_is_zero_not_an_error(self, counted: ForgeSearch) -> None:
+        result = counted._count("nothinglikethis", project=None, doc_only=False)
+
+        assert result["total_chunks"] == 0
+        assert result["files"] == []
+        assert result["truncated"] is False
+
+    def test_unparseable_query_raises(self, counted: ForgeSearch) -> None:
+        with pytest.raises(QueryError):
+            counted._count("fts5:unbalanced (paren", project=None, doc_only=False)
+
+    def test_tool_is_registered(self, counted: ForgeSearch) -> None:
+        mcp = counted.build()
+        names = {t.name for t in asyncio.run(mcp.list_tools())}
+        assert "count_matches" in names

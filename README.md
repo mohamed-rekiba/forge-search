@@ -98,8 +98,8 @@ Add to `.mcp.json` in your project, with an **absolute path**:
 }
 ```
 
-Tools appear as `mcp__forge-search__search_code`, `…__search_docs`, and
-`…__reindex`.
+Tools appear as `mcp__forge-search__search_code`, `…__search_docs`,
+`…__count_matches`, and `…__reindex`.
 
 To point one server at a tree that holds several projects — a monorepo, a
 portfolio of clones — add `--sub-projects` and `--name` sets the tool prefix:
@@ -169,6 +169,7 @@ Details: [docs/searching.md](docs/searching.md).
 |---|---|
 | `search_code(query, project=None, top_k=10)` | Full-text across contents **and** filenames |
 | `search_docs(query, project=None, top_k=10)` | The same, restricted to `.md` / `.rst` / `.txt` |
+| `count_matches(query, project=None, docs_only=False)` | **Every** match as totals + a per-file roster, no excerpts |
 | `reindex(project=None, force=False)` | Rarely needed — searches detect staleness themselves |
 
 Queries are matched **literally**: hyphens, dots, and slashes in identifiers

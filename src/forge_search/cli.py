@@ -537,6 +537,39 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_count(args: argparse.Namespace) -> int:
+    """Complete enumeration: totals and a file roster, no excerpts."""
+    roots = _resolve_roots(args)
+    search = ForgeSearch(roots=roots, index_dir=_index_dir(args))
+    try:
+        result = search._count(args.query, project=args.project, doc_only=args.docs)
+    except QueryError as exc:
+        # Same rule as search: a malformed query is not an empty result, and a
+        # zero count is only usable as proof of absence if the two differ.
+        print(f"query error: {exc}", file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        search.close()
+
+    if reindexed := result.get("reindexed"):
+        print(f"(reindexed: {', '.join(reindexed)})", file=sys.stderr)
+    for warning in result.get("degraded") or []:
+        print(f"(degraded) {warning}", file=sys.stderr)
+
+    for f in result["files"]:
+        print(f"{f['matches']:>6}  {f['project']}/{f['path']}")
+    print(
+        f"{result['total_chunks']} matches in {result['total_files']} files",
+        file=sys.stderr,
+    )
+    if result["truncated"]:
+        print("(file roster truncated)", file=sys.stderr)
+    return 0
+
+
 def _cmd_search(args: argparse.Namespace) -> int:
     roots = _resolve_roots(args)
     search = ForgeSearch(
@@ -694,6 +727,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Rerank results with a cross-encoder (needs `warm --reranker`)",
     )
     search.set_defaults(func=_cmd_search)
+
+    count = sub.add_parser(
+        "count",
+        help="Count every match; print per-file totals instead of excerpts",
+    )
+    _add_root_args(count)
+    count.add_argument("query")
+    count.add_argument("--project", help="Restrict to one root label")
+    count.add_argument("--docs", action="store_true", help="Prose files only")
+    _index_dir_flag(count)
+    count.set_defaults(func=_cmd_count)
 
     # doctor included deliberately: without it, doctor resolves the default
     # index location and reports a correctly-indexed root as unindexed.
