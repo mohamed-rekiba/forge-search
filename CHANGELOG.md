@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/mohamed-rekiba/forge-search/compare/v1.2.0...v1.3.0) (2026-08-18)
+
+
+### Features
+
+* substring search; refusals are messages, not tracebacks ([#61](https://github.com/mohamed-rekiba/forge-search/issues/61)) ([5501cce](https://github.com/mohamed-rekiba/forge-search/commit/5501cce0394115943a76ce8cd0a830f7213d6454))
+
 ## [1.2.0](https://github.com/mohamed-rekiba/forge-search/compare/v1.1.0...v1.2.0) (2026-08-18)
 
 
