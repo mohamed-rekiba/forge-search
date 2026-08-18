@@ -393,3 +393,61 @@ class TestLogLevelHandling:
         before = len(ctx.messages)
         asyncio.run(search._announce(ctx))  # type: ignore[arg-type]
         assert len(ctx.messages) == before, "the summary was announced twice"
+
+
+class TestResultCompleteness:
+    """Three ways a result set can be silently short of the truth.
+
+    Each of these is the project's own stated failure mode — a plausible
+    answer that is quietly incomplete — reached through the result path
+    rather than the query parser.
+    """
+
+    @pytest.fixture
+    def one_root(self, tmp_path: Path):
+        """A single root, which is the ordinary deployment shape."""
+        solo = tmp_path / "solo"
+        solo.mkdir()
+        for i in range(20):
+            (solo / f"mod{i:02d}.py").write_text(f"# needle marker {i}\n")
+        for i in range(10):
+            (solo / f"note{i:02d}.md").write_text(f"Prose about the needle, {i}.\n")
+        fs = ForgeSearch(roots=[Root(label="solo", path=solo)])
+        yield fs
+        fs.close()
+
+    def test_truncated_is_reported_for_a_single_root(self, one_root: ForgeSearch) -> None:
+        """30 files match; 5 are returned. The caller must be told.
+
+        `truncated` was computed after each root had already been capped at
+        `top_k` in SQL, so with one root the comparison could never be true —
+        a constant `false` that reads as "this set is complete".
+        """
+        result = one_root._search("needle", project=None, top_k=5, doc_only=False)
+
+        assert len(result["results"]) == 5
+        assert result["truncated"] is True
+
+    def test_truncated_is_false_when_the_set_really_is_complete(
+        self, one_root: ForgeSearch
+    ) -> None:
+        """The flag has to stay honest in the other direction too."""
+        result = one_root._search(
+            "nothinglikethis", project=None, top_k=5, doc_only=False
+        )
+
+        assert result["results"] == []
+        assert result["truncated"] is False
+
+    def test_doc_only_returns_top_k_documents_not_top_k_minus_code(
+        self, one_root: ForgeSearch
+    ) -> None:
+        """10 docs match and 5 are asked for, so 5 docs must come back.
+
+        Filtering to docs *after* the limit meant the code hits consumed the
+        budget and the caller silently received fewer results than requested.
+        """
+        result = one_root._search("needle", project=None, top_k=5, doc_only=True)
+
+        assert len(result["results"]) == 5
+        assert all(r["path"].endswith(".md") for r in result["results"])

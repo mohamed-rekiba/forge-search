@@ -99,6 +99,12 @@ DOC_SUFFIXES = frozenset({".md", ".markdown", ".rst", ".txt"})
 #: set — which is the token cost this tool exists to avoid.
 MAX_TOP_K = 50
 
+#: Upper bound on how far a `doc_only` search will dig past the ranked window
+#: looking for documents. Reached only when a query matches overwhelmingly in
+#: code; the search then reports itself truncated rather than implying the
+#: thin result set is the whole truth.
+_FETCH_CEILING = 2000
+
 
 @dataclass(slots=True)
 class ForgeSearch:
@@ -203,6 +209,32 @@ class ForgeSearch:
 
     # -- the search path ---------------------------------------------------
 
+    def _fetch(
+        self, index: HybridIndex, query: str, want: int, *, doc_only: bool
+    ) -> tuple[list[Hit], bool]:
+        """Retrieve at least `want` post-filter hits, or prove none remain.
+
+        A `doc_only` filter cannot be applied after the limit. The ranked
+        window fills with code hits, the filter empties it, and the caller is
+        told "no documents match" while ten documents sit unread in the index.
+        So the fetch widens until enough survive the filter or the index is
+        exhausted — `len(raw) < limit` being the proof of exhaustion.
+
+        Returns the hits, and whether the search stopped at `_FETCH_CEILING`
+        with the index still not exhausted. In that case more may exist, and
+        saying so is the whole point: an incomplete answer that presents
+        itself as complete is the failure this project exists to prevent.
+        """
+        limit = want
+        while True:
+            raw = index.search(query, limit=limit, mode=self.mode)
+            kept = [h for h in raw if _is_doc(h.path)] if doc_only else raw
+            if len(kept) >= want or len(raw) < limit:
+                return kept, False
+            if limit >= _FETCH_CEILING:
+                return kept, True
+            limit = min(limit * 4, _FETCH_CEILING)
+
     def _search(
         self,
         query: str,
@@ -218,13 +250,22 @@ class ForgeSearch:
         hits: list[Hit] = []
         degraded: list[str] = []
         reindexed: list[str] = []
+        capped = False
+
+        # Fetch one more than asked for, so "is there anything past this
+        # page?" is answered by the data. Fetching exactly `top_k` makes a
+        # complete set and a clipped one indistinguishable — which is how
+        # `truncated` came to be a constant `false` for any single-root
+        # deployment: every root was already capped at `top_k` in SQL, so the
+        # comparison it was computed from could never be true.
+        want = top_k + 1
 
         for root in selected:
             index = self._index_for(root)
             try:
                 if self._ensure_fresh(index):
                     reindexed.append(root.label)
-                found = index.search(query, limit=top_k, mode=self.mode)
+                found, root_capped = self._fetch(index, query, want, doc_only=doc_only)
             except QueryError:
                 # Propagate — the caller wrote an unparseable query and needs
                 # to know. Never silently degrade this into "no results".
@@ -235,12 +276,11 @@ class ForgeSearch:
                 degraded.append(f"{root.label}: {exc}")
                 continue
 
-            if doc_only:
-                found = [h for h in found if _is_doc(h.path)]
+            capped = capped or root_capped
             hits.extend(found)
 
         hits.sort(key=lambda h: h.score, reverse=True)
-        truncated = len(hits) > top_k
+        truncated = capped or len(hits) > top_k
         hits = hits[:top_k]
 
         return {

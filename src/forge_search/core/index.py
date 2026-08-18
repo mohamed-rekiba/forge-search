@@ -56,7 +56,7 @@ _PATH_MATCH_SCORE = 1000.0
 #: while missing the paths table entirely — and because the stamp matches, no
 #: later check would ever catch them. A bump is the only way past a bad stamp,
 #: which is itself an argument for making these guards blunt rather than clever.
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS files (
@@ -72,7 +72,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
     relpath UNINDEXED,
     line    UNINDEXED,
     body,
-    tokenize = 'unicode61 remove_diacritics 2'
+    -- `tokenchars '_'` keeps underscores inside tokens. Without it
+    -- unicode61 treats '_' (Unicode Pc) as a separator at both index and
+    -- query time, so `__hidden__` is stored and searched as the bare token
+    -- `hidden` -- every dunder, every snake_case name and every _private
+    -- member matches on its fragments, which is the opposite of the literal
+    -- matching this index promises.
+    tokenize = "unicode61 remove_diacritics 2 tokenchars '_'"
 );
 
 -- Paths are indexed separately from content, because a filename lookup is
@@ -82,7 +88,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
 -- do, and which was one of the dominant query shapes this tool targets.
 CREATE VIRTUAL TABLE IF NOT EXISTS paths USING fts5(
     relpath,
-    tokenize = 'unicode61 remove_diacritics 2'
+    -- `tokenchars '_'` keeps underscores inside tokens. Without it
+    -- unicode61 treats '_' (Unicode Pc) as a separator at both index and
+    -- query time, so `__hidden__` is stored and searched as the bare token
+    -- `hidden` -- every dunder, every snake_case name and every _private
+    -- member matches on its fragments, which is the opposite of the literal
+    -- matching this index promises.
+    tokenize = "unicode61 remove_diacritics 2 tokenchars '_'"
 );
 
 CREATE TABLE IF NOT EXISTS meta (
@@ -249,8 +261,16 @@ class LexicalIndex:
             # which stamped the current version onto a stale index and left the
             # gap it was written to close. Clearing an already-empty index is
             # free; skipping a needed rebuild is silent and permanent.
-            self._conn.execute("DELETE FROM chunks")
-            self._conn.execute("DELETE FROM paths")
+            # DROP, not DELETE, for the two FTS5 tables. A virtual table's
+            # tokenizer is fixed at creation, and the schema script creates
+            # them with IF NOT EXISTS -- so emptying the rows would leave an
+            # index that rebuilds its content using the *old* tokenizer and
+            # reports itself current. That is the "partial migration that
+            # misses one table" this guard was written to avoid, one level
+            # below where it was being checked.
+            self._conn.execute("DROP TABLE IF EXISTS chunks")
+            self._conn.execute("DROP TABLE IF EXISTS paths")
+            self._conn.executescript(_SCHEMA)
             self._conn.execute("DELETE FROM files")
             # The refresh stamp describes rows that no longer exist, so it goes
             # with them. Leaving it behind is the same hazard this guard exists

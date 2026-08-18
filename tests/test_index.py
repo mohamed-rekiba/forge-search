@@ -380,3 +380,54 @@ def test_an_existing_gitignore_is_not_clobbered(tmp_path):
     with LexicalIndex(Root(label="p", path=tmp_path)) as ix:
         ix.reindex()
     assert "hand-edited" in (d / ".gitignore").read_text()
+
+
+class TestIdentifierTokenization:
+    """Underscores are part of an identifier, not a separator.
+
+    FTS5's stock `unicode61` tokenizer treats `_` (Unicode category Pc) as a
+    separator at both index and query time, so `__hidden__` was stored and
+    searched as the bare token `hidden`. Every dunder, every `snake_case`
+    name, and every `_private` member therefore matched on its fragments —
+    which is the opposite of the literal matching this index advertises.
+    """
+
+    @pytest.fixture
+    def dunders(self, tmp_path: Path) -> Root:
+        src = tmp_path / "dunders"
+        src.mkdir()
+        (src / "models.py").write_text("__hidden__ = frozenset()\n")
+        (src / "prose.md").write_text("Lazy loading reintroduces hidden I/O.\n")
+        (src / "other.py").write_text("def validate_token():\n    return 1\n")
+        (src / "partial.py").write_text("token = 1\n")
+        return Root(label="dunders", path=src)
+
+    def test_a_dunder_does_not_match_the_bare_word(self, dunders: Root) -> None:
+        index = LexicalIndex(dunders)
+        index.reindex()
+
+        paths = {h.path for h in index.search("__hidden__", limit=10)}
+
+        assert paths == {"models.py"}, "the bare word 'hidden' must not match"
+        index.close()
+
+    def test_the_bare_word_does_not_match_a_dunder(self, dunders: Root) -> None:
+        """The exclusion has to hold in both directions."""
+        index = LexicalIndex(dunders)
+        index.reindex()
+
+        paths = {h.path for h in index.search("hidden", limit=10)}
+
+        assert paths == {"prose.md"}
+        index.close()
+
+    def test_snake_case_identifiers_match_whole(self, dunders: Root) -> None:
+        """`validate_token` is one name, not `validate` AND `token`."""
+        index = LexicalIndex(dunders)
+        index.reindex()
+
+        paths = {h.path for h in index.search("validate_token", limit=10)}
+
+        assert "partial.py" not in paths, "matched on the 'token' fragment alone"
+        assert "other.py" in paths
+        index.close()
