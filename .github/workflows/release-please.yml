@@ -32,10 +32,6 @@ concurrency:
 # and the alternative is a reusable workflow for two lines. Keep them in step —
 # a lock produced by a different uv than CI validates is the drift this file is
 # fixing, one level up.
-env:
-  PYTHON_VERSION: "3.14"
-  UV_VERSION: "0.12.0"
-
 jobs:
   release-please:
     name: Open or update the release PR
@@ -52,26 +48,3 @@ jobs:
           # publish.yml about running it manually or swapping in a PAT if you
           # want the chain fully automatic.
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      # release-please knows nothing about uv.lock, so the lock keeps naming the
-      # previous version and a fresh clone's first `uv sync` rewrites it. The
-      # re-lock has to happen here, in the same job: PRs created with the default
-      # GITHUB_TOKEN do not trigger `pull_request` workflows, so an event-driven
-      # version would never fire. (#41)
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: astral-sh/setup-uv@v10.0.1
-        with:
-          version: ${{ env.UV_VERSION }}
-          python-version: ${{ env.PYTHON_VERSION }}
-      # Deliberately NO `if:` gate. `prs_created` is false whenever an open
-      # release PR was merely *updated* rather than created — release-please
-      # returns undefined when the PR body is unchanged, and the action filters
-      # those out of its outputs. Gating on it would skip exactly the case this
-      # exists for: an existing release PR that still carries a stale lock. The
-      # script's own "no open release PR" check is the cheap early exit instead.
-      - name: Re-lock the release PR
-        run: bash scripts/relock-release-pr.sh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

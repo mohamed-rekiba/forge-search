@@ -1,2 +1,3 @@
-def hello() -> str:
-    return "Hello from forge-search!"
+"""Forge Search"""
+
+__version__ = "1.3.0"  # x-release-please-version

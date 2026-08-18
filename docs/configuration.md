@@ -97,6 +97,30 @@ Add to `.mcp.json` in your project, with an **absolute path**:
 Tools then appear as `mcp__forge-search__search_code`, `…__search_docs`,
 `…__count_matches`, and `…__reindex`.
 
+### Roots from the environment
+
+A root can be stated without a flag, for callers that have nowhere to put one:
+
+| Variable | Effect |
+| --- | --- |
+| `FORGE_SEARCH_ROOTS` | `os.pathsep`-separated `[label=]path` entries, the same form `--root` takes |
+| `APEXYARD_OPS_ROOT` | one root, labelled `ops` |
+| `APEXYARD_PORTFOLIO_ROOT` | one root, labelled `portfolio` |
+
+Order of precedence, highest first: `--root`, then `FORGE_SEARCH_ROOTS`, then
+the two apexyard variables, then the working directory. One source at a time —
+the native variable wins outright rather than merging with the aliases, so a
+reader never has to work out the union of two settings to know what is
+searched. The notice on stderr names whichever variable supplied the roots,
+because that is the first thing to check when the wrong tree turns up.
+
+All of them are optional. A variable pointing at something that is not a
+directory is skipped with a warning rather than being fatal, and the next
+source down is used. That matters most for the apexyard pair: they belong to
+another product, and refusing to start because a variable this project does not
+own has gone stale would turn a courtesy into a dependency. Skipped is not
+silent — the warning names the variable.
+
 To serve a whole portfolio of clones from one server, add `"--sub-projects",
 "workspace"` (or whatever directory holds them) and a `"--name"` of your
 choosing to those args, with the root pointing at the parent tree — see the

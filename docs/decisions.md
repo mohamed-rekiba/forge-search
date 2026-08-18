@@ -39,8 +39,8 @@ rather than trying to be precise.
 
 ## Nothing is discovered
 
-Roots are named explicitly. Adapters are named explicitly. There is no
-walk-up, no cwd inference, no marker sniffing, no fallback guess.
+Roots are named explicitly. There is no walk-up, no cwd inference, no marker
+sniffing, no fallback guess.
 
 **Reversed once.** The original justification was "your editor substitutes the
 project path at launch, so inferring it solves a solved problem." Half of that
@@ -54,7 +54,7 @@ somewhere else. A wrong *absolute path* fails at startup with a message. The
 honest cost, which the first version waved away: an absolute path makes a
 shared `.mcp.json` per-machine.
 
-Detection has the same flaw as guessing. An adapter that enables itself
+Detection has the same flaw as guessing. Anything that switches itself on
 because it spotted a marker file can fire when unwanted and stay silent when
 wanted, both invisibly. Naming it costs one flag and removes the class.
 
@@ -293,50 +293,62 @@ SHA pinning is stronger — the only form a moved tag cannot subvert — but it
 forfeits automatic patches everywhere. Not adopted. Worth revisiting given
 `publish.yml` touches PyPI.
 
-## The release re-locks itself, in the same job
+## The release does not touch the lockfile
 
-release-please bumps `pyproject.toml` and knows nothing about `uv.lock`, so after
-0.6.0 shipped the lockfile on `main` still named 0.5.0. Small and constant cost:
-the first `uv sync` in a fresh clone rewrote it, so every contributor started
-with a diff they had not made. And a lockfile that disagrees with the released
-tree fails at the one thing a lockfile is for.
+**Reversed, and the whole mechanism removed.**
 
-`release-please.yml` now re-locks the release PR and pushes to its branch, via
-`scripts/relock-release-pr.sh`.
+release-please bumps the version and knows nothing about `uv.lock`, so after
+0.6.0 shipped the lockfile on `main` still named 0.5.0. A fresh clone's first
+`uv sync` rewrote it, so every contributor started with a diff they had not
+made — and a lockfile that disagrees with the released tree fails at the one
+thing a lockfile is for. `release-please.yml` answered that by re-locking the
+release PR and pushing to its branch, which brought a chain of consequences: it
+had to run in the same job, because PRs opened with the default `GITHUB_TOKEN`
+do not trigger `pull_request` workflows; it had to find the PR by title,
+because the action reports no `pr` for an update that changes no release-note
+content; and it had to validate the lock itself, because a release PR has no
+check runs at all.
 
-**It has to be the same job, not its own workflow.** release-please opens that PR
-with the default `GITHUB_TOKEN`, and PRs created by that token do not trigger
-`pull_request` workflows — the same limitation `publish.yml` already documents
-for the release tag. An event-driven re-lock would simply never fire.
+None of that was wrong. All of it was downstream of one thing: **the version
+was static, so `uv` recorded it inside `uv.lock`.** Declare the version dynamic
+and `uv` records none — a release bump cannot invalidate the lock, and there is
+nothing to re-lock. Measured both ways before adopting it: static, a bump
+rewrites `uv.lock`; dynamic, `uv lock` produces no diff. A release PR now
+touches `CHANGELOG.md`, the manifest, and the one line in the package that
+carries `__version__`.
 
-**The PR is found by title, not by the action's `pr` output.** Not because that
-output is undocumented — `headBranchName` is declared on the `PullRequest`
-interface the README links. The reason is stronger: `pr` is **unset in exactly
-the case that matters**. release-please returns nothing for a PR whose body it
-left unchanged, and the action filters those out, so both `pr` and `prs_created`
-go empty on a push that updates no release-note content — the adoption case,
-where the PR already exists and only the lock is stale, and the retry case. An
-update that *does* change the body sets both, so this is narrower than "updates
-never report a PR". The step therefore carries no `if:` gate, and finds the PR by
-the title pattern we configure ourselves.
+**The validation moved to CI, and the reason it was once rejected is gone.**
+It was rejected here on the grounds that CI never runs on a release PR, so a
+check there could not see release-time drift. That was correct while the
+release PR changed the lock. It no longer does — the lock it ships is
+byte-for-byte the one on `main` — so verifying `main` verifies the release.
 
-**A release PR has no CI at all.** Not "checks that describe the pre-re-lock
-commit" — zero check runs, because the `GITHUB_TOKEN` that opened it cannot
-trigger `pull_request` workflows. So the lockfile heading for the tag is
-unvalidated by anything downstream, which is why the script runs `uv sync
---locked` itself and refuses to push a lock that does not satisfy
-`pyproject.toml`. That check is not belt-and-braces; it is the only one there is.
+The check itself was overdue regardless. Every CI job ran a plain `uv sync`,
+which **rewrites** `uv.lock` rather than verifying it, so drift between
+`pyproject.toml` and the lock passed CI unnoticed on every ordinary PR and was
+caught only at release time. A `Lockfile` job now runs `uv sync --locked
+--all-extras` on every push and pull request. `--all-extras` because the
+semantic extra carries four of the five declared dependencies; the base install
+alone leaves them unchecked.
 
-Rejected: adding `uv lock --check` to CI instead. For the same reason — CI never
-runs on a release PR, so a check there cannot see release-time drift. It would
-catch the case where someone hand-edits `pyproject.toml` in an ordinary PR, which
-is a different and much rarer problem.
+Requires hatchling: `uv_build` refuses a dynamic version outright. Two of its
+defaults had to be stated rather than inherited — the wheel's package root, and
+the sdist contents, since hatchling does not exclude the project's own virtual
+environments and packaging one fails the build on an absolute symlink into the
+interpreter.
 
-## Sub-projects replace the adapter seam
+**What this gives up:** the version line now carries a marker comment that
+release-please keys on, and release-please skips the bump *silently* without
+it — no error, releases keep happening, the package reports the old version
+indefinitely. Four tests pin the arrangement, because nothing else would say.
 
-`RootProvider` is gone. Its own docstring said the seam existed to supply
-"the part a caller genuinely cannot supply: knowing that one root is a
-portfolio containing several projects, and what each should be called." That
+## Sub-projects, not a plugin seam
+
+There is no plugin point for teaching the tool about a tree shape. There was
+one briefly, and `RootProvider` is gone. Its own docstring said the seam
+existed to supply "the part a caller genuinely cannot supply: knowing that one
+root is a portfolio containing several projects, and what each should be
+called." That
 was never true. The one shipped implementation read a portfolio's own
 `apexyard.projects.yaml` to answer a question the caller already knew the
 answer to. `--sub-projects <dir>[,<dir>...]` states it instead: each
@@ -344,7 +356,7 @@ directory, resolved relative to the root, is scanned for checkouts, and each
 one becomes a labelled root.
 
 This makes `core/roots.py` **more** faithful to "Nothing is discovered," not
-less. The adapter was the one place in the module that read a project's own
+less. That seam was the one place in the module that read a project's own
 config to infer structure — every guess this file refuses to make elsewhere,
 it was still making, once, for exactly the caller who most needed the module
 to mean what it said. With the flag, the root and its sub-project
@@ -358,23 +370,21 @@ directory. `git worktree add` produces a `.git` that is a *file* — a
 plain clone. Silent and one-sided is exactly the failure class this project
 exists to catch, so the guard tests existence, not shape.
 
-**Removing `--adapter` is a breaking change, with no compatibility alias.** An
+**Removing the seam is a breaking change, with no compatibility alias.** An
 alias would keep `RootProvider`'s shape alive under another name, for a
 second implementation that has never existed and that a flag does not need —
 exactly the speculative extension point this change exists to remove.
 Pre-1.0 projects are entitled to break on a minor, and this one does.
 
-**What this gives up:** the adapter's one behaviour `--sub-projects` does not
-reproduce is registry-driven opt-in — only *registered* projects with a local
+**What this gives up:** the one behaviour `--sub-projects` does not reproduce
+is registry-driven opt-in — only *registered* projects with a local
 clone were ever expanded. `--sub-projects` expands every checkout it finds
 under the named directory, registered or not. Naming the directory is still
 an explicit act; what turns up inside it is no longer filtered against
 anything else.
 
-Corrects a line in ["Nothing is discovered"](#nothing-is-discovered) above:
-"Adapters are named explicitly" described a component that no longer exists.
-The principle it was defending — nothing here infers what the caller can
-state directly — is what motivated removing it.
+The principle this defends — nothing here infers what the caller can state
+directly — is what motivated the removal.
 
 ---
 

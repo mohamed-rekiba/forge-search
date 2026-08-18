@@ -20,13 +20,16 @@ query ran against real content.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import re
+import signal
 import sqlite3
 import sys
 import time
 from pathlib import Path
 
+from . import __version__
 from .core.bench import BenchQuery, run_bench
 from .core.cache import index_path_for
 from .core.embedding import HashingEmbedder, OnnxEmbedder
@@ -98,6 +101,59 @@ def _names_the_workspace(path_str: str, prefix: str) -> bool:
     return path_str[len(prefix)] in (os.sep, os.altsep or os.sep)
 
 
+#: Roots stated in the environment, for callers that cannot pass flags --
+#: an MCP client config, a shell hook. `os.pathsep`-separated, each entry the
+#: same `[label=]path` form `--root` takes.
+ENV_ROOTS = "FORGE_SEARCH_ROOTS"
+
+#: Read as aliases, in this order, when ENV_ROOTS is unset. They belong to
+#: apexyard, not to this project, and are honoured because apexyard's config
+#: validator requires both to be present and to point at real directories:
+#: requiring them in the config while ignoring them at runtime would leave a
+#: reader with two plausible beliefs about which tree is searched and no way to
+#: tell which is true. The label comes from the variable rather than the
+#: directory basename, so `--project ops` means what it says.
+ALIAS_ROOTS: tuple[tuple[str, str], ...] = (
+    ("APEXYARD_OPS_ROOT", "ops"),
+    ("APEXYARD_PORTFOLIO_ROOT", "portfolio"),
+)
+
+
+def _roots_from_env() -> tuple[list[str], str]:
+    """Root specs stated in the environment, and which variable stated them.
+
+    One source at a time: the native variable wins outright rather than being
+    merged with the aliases, so a reader never has to work out the union of two
+    settings to know what is searched.
+
+    Every variable here is **optional**, and a stale one is skipped rather than
+    fatal. The aliases in particular are another product's; refusing to start
+    because a variable this project does not own points somewhere that no
+    longer exists would turn a courtesy into a dependency. Skipped is not
+    silent, though -- the warning names the variable, so a config that has
+    drifted stays visible to whoever has to fix it.
+    """
+    raw = os.environ.get(ENV_ROOTS, "").strip()
+    if raw:
+        return [s for s in raw.split(os.pathsep) if s.strip()], ENV_ROOTS
+
+    specs: list[str] = []
+    used: list[str] = []
+    for var, label in ALIAS_ROOTS:
+        value = os.environ.get(var, "").strip()
+        if not value:
+            continue
+        if not Path(value).is_dir():
+            print(
+                f"{var} is set to {value!r}, which is not a directory — ignoring it.",
+                file=sys.stderr,
+            )
+            continue
+        specs.append(f"{label}={value}")
+        used.append(var)
+    return specs, ", ".join(used)
+
+
 def _explicit_roots(args: argparse.Namespace) -> list[Root]:
     """The roots the caller named, before any `--sub-projects` expansion.
 
@@ -108,6 +164,16 @@ def _explicit_roots(args: argparse.Namespace) -> list[Root]:
     but each named sub-projects directory is re-scanned every call, so a clone
     that appeared since startup is picked up.
     """
+    if not args.root:
+        env_specs, source = _roots_from_env()
+        if env_specs:
+            # A variable is the caller stating which tree they mean, exactly as
+            # a flag is -- so this is not the guess below and is not announced
+            # as one. Which variable supplied it is named, because that is the
+            # first thing to check when the wrong tree turns up.
+            print(f"roots from {source}", file=sys.stderr)
+            args.root = env_specs
+
     if not args.root:
         # Fall back to the working directory, and SAY SO.
         #
@@ -125,8 +191,7 @@ def _explicit_roots(args: argparse.Namespace) -> list[Root]:
         # as "search is unavailable" rather than as "you forgot a flag".
         cwd = Path.cwd().resolve()
         print(
-            f"no --root given; using the working directory: {cwd}\n"
-            "  pass --root /absolute/path to search a different project.",
+            f"no --root given; using the working directory: {cwd}\n",
             file=sys.stderr,
         )
         args.root = [str(cwd)]
@@ -220,9 +285,9 @@ def _resolve_roots(args: argparse.Namespace) -> list[Root]:  # noqa: D401
 def _index_dir(args: argparse.Namespace) -> str | None:
     """Where indexes go: `--index-dir` if given, else `.forge_search` per root.
 
-    Used to have a middle tier here — an adapter could move the default for a
-    tree shape it understood. With no adapters, nothing supplies that
-    preference any more, so the explicit flag is the only override left.
+    Used to have a middle tier here, where a component that recognised a tree
+    shape could move the default. Nothing supplies that preference any more, so
+    the explicit flag is the only override left.
     """
     return getattr(args, "index_dir", None)
 
@@ -381,9 +446,47 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         summary=resolution.describe() if resolution else None,
         root_resolver=_reresolve,
     )
+
+    def _stop(_signum: int, _frame: object) -> None:
+        """Stop on the FIRST Ctrl-C, without unwinding.
+
+        Returning from the handler and letting the interpreter shut down does
+        not work here, and the reason is worth writing down.
+
+        The stdio transport reads stdin by iterating a file, which anyio runs
+        as a blocking `readline()` on a worker thread. Against a terminal that
+        thread sits in `read()`; nothing is ever going to write to it, and
+        cancellation cannot reach a thread blocked in a syscall. asyncio's own
+        SIGINT handling makes the first press cancel the main task rather than
+        raise, so that press appears to do nothing at all. The second raises
+        `KeyboardInterrupt`, and interpreter shutdown then joins the worker
+        threads, which are not daemons — so it hangs there until a third press
+        interrupts the join and prints a traceback out of `threading._shutdown`.
+
+        Three presses and a traceback, for a documented way to stop a server.
+
+        Nothing worth unwinding remains at this point, and deliberately nothing
+        is unwound. The index handles are **not** closed here: a signal handler
+        runs on the main thread at an arbitrary point, and closing SQLite while
+        a worker thread holds its mutex aborts the process from the C++ runtime
+        instead of exiting it. Leaving them is safe — read connections need no
+        clean close, and a write is either committed or rolled back on reopen.
+
+        So flush and leave. `os._exit` skips atexit handlers and buffer
+        flushing, which is exactly why the flushes are explicit.
+        """
+        print("interrupted", file=sys.stderr)
+        with contextlib.suppress(Exception):
+            sys.stdout.flush()
+            sys.stderr.flush()
+        os._exit(0)
+
+    previous = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, _stop)
     try:
         search.run(transport=args.transport)
     finally:
+        signal.signal(signal.SIGINT, previous)
         search.close()
     return 0
 
@@ -659,9 +762,31 @@ def _add_root_args(parser: argparse.ArgumentParser) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="forge-search",
-        description="Local code and docs search over one or many repositories.",
+        # The version belongs in the help, not only behind a flag you have to
+        # know exists. `--version` answers "which build" once you already
+        # suspect a version problem; this answers it while you are reading.
+        description=(
+            "Local code and docs search over one or many repositories.\n"
+            f"version {__version__}"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    sub = parser.add_subparsers(dest="command", required=True)
+    # "Which build is this" is the first question when a result set looks
+    # wrong, when an MCP client and a shell disagree about what is installed,
+    # or when a bug report arrives against a versioned index schema. Until this
+    # existed the only answer was to go reading site-packages.
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"forge-search {__version__}",
+        help="Print the version and exit",
+    )
+    # Not `required=True`. Running the bare command is someone asking what
+    # this is, and argparse answers that with "error: the following arguments
+    # are required: command" on stderr and exit 2 — which tells them they did
+    # something wrong instead of what they can do. The empty case is handled
+    # below; a *wrong* command still fails, because that is a different thing.
+    sub = parser.add_subparsers(dest="command")
 
     serve = sub.add_parser("serve", help="Run the MCP server")
     _add_root_args(serve)
@@ -807,6 +932,14 @@ def main(argv: list[str] | None = None) -> int:
     bench.set_defaults(func=_cmd_bench)
 
     args = parser.parse_args(argv)
+
+    if args.command is None:
+        # stdout and exit 0: this is an answer, not a complaint, and it should
+        # survive being piped into a pager without the shell calling it a
+        # failure.
+        parser.print_help()
+        raise SystemExit(0)
+
     try:
         return int(args.func(args))
     except KeyboardInterrupt:

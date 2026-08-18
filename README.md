@@ -65,6 +65,9 @@ wheels for cp314.
 ## Use
 
 ```bash
+# Which build is installed
+forge-search --version
+
 # One-shot search — the fastest way to check behaviour
 forge-search search "validate_token" --root /abs/path/to/project
 forge-search search "require-active-ticket" --root api=~/code/api --top-k 5
@@ -219,16 +222,23 @@ Then register the server under the matching name, so the tools resolve as
 }
 ```
 
-The two `env` keys are apexyard's, not forge-search's — nothing here reads
-them — but apexyard's `validate-search-config.sh` requires both to be present
-and to point at directories that exist, and reports the config broken
-otherwise.
+The two `env` keys are apexyard's, and its `validate-search-config.sh`
+requires both to be present and to point at directories that exist. They are
+also **read here**: with no `--root` on the command line, `APEXYARD_OPS_ROOT`
+and `APEXYARD_PORTFOLIO_ROOT` each become a root, labelled `ops` and
+`portfolio` so `--project ops` means what it says. Requiring them in the config
+while ignoring them at runtime would leave a reader with two plausible beliefs
+about which tree is searched and no way to tell which is true.
+
+Both are optional, and a stale one is skipped with a warning rather than being
+fatal — they are another product's variables, and refusing to start over one
+this project does not own would turn a courtesy into a dependency.
 
 Two notes on the fit:
 
-- **`--adapter apexyard` no longer exists.** It read a portfolio's
-  `apexyard.projects.yaml` to infer its projects; `--sub-projects` states them
-  instead. See [docs/decisions.md](docs/decisions.md).
+- **A portfolio's projects are stated, not inferred.** Earlier versions read a
+  portfolio's `apexyard.projects.yaml` to discover them; `--sub-projects`
+  names the directories instead. See [docs/decisions.md](docs/decisions.md).
 - **The session-start hook passes no `--root`.** It runs `apexyard-search
   doctor` and `apexyard-search reindex --incremental --if-stale=<seconds>` from
   inside the project, so both fall back to the working directory and announce
