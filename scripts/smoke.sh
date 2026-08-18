@@ -88,15 +88,20 @@ if ! grep -q a.md "$STDOUT"; then
          "stderr was:" "$(cat "$STDERR")"
 fi
 
-# Nothing is discovered, by design. A missing --root has to name the fix rather
-# than quietly indexing the working directory.
-if "$VENV/bin/forge-search" serve 2>"$STDERR"; then
-    fail "serve exited 0 with no --root. It must refuse rather than guess a root." \
-         "Its stderr was:" "$(cat "$STDERR")"
+# A missing --root falls back to the working directory. What must never happen
+# is that it does so QUIETLY: the recorded objection to inferring a root was
+# never the inference, it was that a wrong guess leaves nothing to look at.
+# So the packaged CLI has to name the absolute path it chose, before indexing.
+"$VENV/bin/forge-search" index 2>"$STDERR" || fail \
+    "index exited non-zero with no --root; the fallback should have run." \
+    "Its stderr was:" "$(cat "$STDERR")"
+if ! grep -q "no --root given" "$STDERR"; then
+    fail "a root was inferred with no notice on stderr, which is the silent" \
+         "guess the design rejects:" "$(cat "$STDERR")"
 fi
-if ! grep -q -- "--root" "$STDERR"; then
-    fail "serve refused a missing --root but never mentioned --root, so the" \
-         "message does not tell the reader what to fix:" "$(cat "$STDERR")"
+if ! grep -q "$PWD" "$STDERR"; then
+    fail "the fallback notice did not name the absolute path it resolved, so" \
+         "it cannot be checked against the tree meant:" "$(cat "$STDERR")"
 fi
 
-echo "smoke: wheel installs, CLI runs, search hits, missing --root fails loudly"
+echo "smoke: wheel installs, CLI runs, search hits, inferred root announced"
