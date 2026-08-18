@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/mohamed-rekiba/forge-search/compare/v1.0.0...v1.0.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* three silent-shortfall paths in the result pipeline ([#55](https://github.com/mohamed-rekiba/forge-search/issues/55)) ([faef5f7](https://github.com/mohamed-rekiba/forge-search/commit/faef5f7544f20edf914efddccb055eb02bb7a9e4))
+
 ## [1.0.0](https://github.com/mohamed-rekiba/forge-search/compare/v0.6.0...v1.0.0) (2026-08-02)
 
 
