@@ -73,11 +73,13 @@ is indexed. A stated default can be checked against the tree the caller meant;
 that is the entire difference, and it is what the earlier reversal was really
 defending.
 
-`serve` is excluded and still refuses. A server's root is written once into an
-MCP client config, where naming it costs nothing, and a wrong one is not a
-wrong answer but a wrong answer for the whole session, to every caller,
-invisibly — which is the case this rule was really written for. The fallback is
-for one-shot commands run from inside a project.
+This holds for `serve` too. It was briefly excluded, reasoning that a server's
+root is named once in a config and a wrong one is wrong for a whole session
+rather than for one command. The risk is real — but what makes it
+unrecoverable is the silence, and the notice removes the silence there exactly
+as it does everywhere else. One rule across every subcommand also spares a
+caller from remembering which half of the CLI guesses, and `serve` announcing
+its root on stderr is behaviour this project already relies on.
 
 Explicit roots are untouched, and remain the recommendation.
 

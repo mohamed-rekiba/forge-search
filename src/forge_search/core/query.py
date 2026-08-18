@@ -31,12 +31,19 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["QueryError", "to_fts5", "RAW_PREFIX"]
+__all__ = ["QueryError", "to_fts5", "RAW_PREFIX", "SUB_PREFIX", "substring_of"]
 
 #: Opt-in escape hatch for callers who genuinely want FTS5 expression syntax
 #: (``NEAR``, boolean operators, column filters). Prefixed rather than a
 #: separate parameter so it survives any transport without a schema change.
 RAW_PREFIX = "fts5:"
+
+#: Opt-in substring matching. Whole-token indexing is what makes `__hidden__`
+#: exact instead of matching every occurrence of "hidden" — and it is also why
+#: `hidden` cannot find `__hidden__`, which `grep` does without being asked.
+#: The two are different tokens, so no query against the token index reaches
+#: across them. This prefix asks for a scan instead.
+SUB_PREFIX = "sub:"
 
 # A "bare word" for our purposes: letters, digits, underscore. Everything else
 # is a separator to the tokenizer, so anything containing other characters
@@ -98,3 +105,20 @@ def to_fts5(query: str) -> str:
 
     terms = query.split()
     return " ".join(t if _BARE.match(t) else _quote_phrase(t) for t in terms)
+
+
+def substring_of(query: str) -> str | None:
+    """The literal text a ``sub:`` query is looking for, or None.
+
+    Returned unescaped and uninterpreted: the caller matches it with SQLite's
+    ``instr``, which has no metacharacters, so there is nothing here for a
+    user to have to quote. That is the whole appeal of a scan for this job —
+    the thing people reach for a fragment search to do is find text they can
+    see, exactly as they can see it.
+    """
+    if not query.startswith(SUB_PREFIX):
+        return None
+    needle = query[len(SUB_PREFIX) :].strip()
+    if not needle:
+        raise QueryError("substring query is empty after the 'sub:' prefix")
+    return needle

@@ -83,15 +83,24 @@ def test_an_explicit_root_is_never_overridden(
     assert "other" in captured.out
 
 
-def test_serve_still_refuses_a_missing_root(project: Path) -> None:
-    """The fallback is for one-shot commands, not for a long-lived server.
+def test_serve_also_falls_back_and_announces(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`serve` takes the fallback too, on the same terms as everything else.
 
-    A server's root is written once into an MCP client config, where naming it
-    costs nothing. A wrong one is not a wrong answer — it is a wrong answer for
-    the whole session, to every caller, invisibly. That is the case the
-    "nothing is discovered" rule was really written for, and it is untouched.
+    It was briefly excluded, on the reasoning that a server's root is written
+    once into a config and a wrong one is wrong for a whole session rather than
+    one command. That risk is real, but it is the *silence* that makes it
+    unrecoverable, and the notice removes the silence here exactly as it does
+    elsewhere. One rule across every subcommand also means a caller never has
+    to remember which half of the CLI guesses.
     """
-    with pytest.raises(SystemExit) as exc:
-        main(["serve"])
+    import forge_search.core.server as server_mod
 
-    assert "--root" in str(exc.value)
+    monkeypatch.setattr(server_mod.ForgeSearch, "run", lambda self, **kw: None)
+
+    assert main(["serve"]) == 0
+
+    err = capsys.readouterr().err
+    assert "no --root given" in err
+    assert str(project) in err

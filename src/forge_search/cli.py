@@ -108,21 +108,6 @@ def _explicit_roots(args: argparse.Namespace) -> list[Root]:
     but each named sub-projects directory is re-scanned every call, so a clone
     that appeared since startup is picked up.
     """
-    if not args.root and getattr(args, "strict_root", False):
-        # `serve` still refuses. The fallback below is for one-shot commands
-        # run from inside a project; a long-lived server is the opposite case.
-        # Its root is written once into an MCP client config, where naming it
-        # costs nothing, and a wrong one is not a wrong answer but a wrong
-        # answer for the whole session, to every caller, invisibly.
-        raise SystemExit(
-            "no --root given. forge-search does not guess which project a "
-            "server should host.\n"
-            "  --root /absolute/path/to/project\n"
-            "  --root myproject=/absolute/path        (labelled)\n"
-            "\nUse an absolute path. `${workspaceFolder}` is a VS Code "
-            "variable and is not expanded by every MCP client."
-        )
-
     if not args.root:
         # Fall back to the working directory, and SAY SO.
         #
@@ -350,7 +335,15 @@ def _cmd_bench(args: argparse.Namespace) -> int:
         index_dir=_index_dir(args),
     ) as index:
         index.reindex()
-        print(run_bench(index, queries, top_k=args.top_k).render())
+        try:
+            print(run_bench(index, queries, top_k=args.top_k).render())
+        except ValueError as exc:
+            # Same posture as search and count: a refusal is a message and an
+            # exit code, never a traceback. The sentence explaining *why* the
+            # harness will not invent queries is worth reading, and it was
+            # being printed under twenty frames of interpreter internals.
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
     return 0
 
 
@@ -696,7 +689,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Rerank results with a cross-encoder (needs `warm --reranker`)",
     )
-    serve.set_defaults(func=_cmd_serve, strict_root=True)
+    serve.set_defaults(func=_cmd_serve)
 
     index = sub.add_parser("index", help="Build or refresh indexes")
     _add_root_args(index)
@@ -814,7 +807,15 @@ def main(argv: list[str] | None = None) -> int:
     bench.set_defaults(func=_cmd_bench)
 
     args = parser.parse_args(argv)
-    return int(args.func(args))
+    try:
+        return int(args.func(args))
+    except KeyboardInterrupt:
+        # Ctrl-C is the documented way to stop `serve`, so it is a normal exit,
+        # not a fault. Left to the interpreter it surfaces as a traceback
+        # through anyio and asyncio internals -- twenty frames of site-packages
+        # that read as a defect in the tool and tell the operator nothing.
+        print("interrupted", file=sys.stderr)
+        return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

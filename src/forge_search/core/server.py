@@ -41,7 +41,7 @@ from .embedding import Embedder
 from .fusion import ArmWeights
 from .hybrid import HybridIndex, SearchMode
 from .index import Hit
-from .query import QueryError
+from .query import QueryError, substring_of
 from .rerank import Reranker
 from .roots import Root
 from .traversal import TraversalConfig
@@ -285,6 +285,27 @@ class ForgeSearch:
             hits.extend(found)
 
         hits.sort(key=lambda h: h.score, reverse=True)
+
+        # Nothing matched literally. The index matches whole tokens, so a
+        # caller who typed a fragment -- `validate_tok`, `hidden` for
+        # `__hidden__` -- gets zero results and no way to tell that from a
+        # genuine absence. Zero is the one case where widening costs nothing,
+        # so widen; and say which pass answered, because a substring hit and a
+        # literal one are not the same claim.
+        matched = "literal"
+        if not hits and substring_of(query) is None and not query.startswith("fts5:"):
+            matched = "substring"
+            for root in selected:
+                try:
+                    found, root_capped = self._fetch(
+                        self._index_for(root), f"sub:{query}", want, doc_only=doc_only
+                    )
+                except QueryError, OSError:
+                    continue
+                capped = capped or root_capped
+                hits.extend(found)
+            hits.sort(key=lambda h: (h.project, h.path, h.line))
+
         truncated = capped or len(hits) > top_k
         hits = hits[:top_k]
 
@@ -300,6 +321,7 @@ class ForgeSearch:
                 for h in hits
             ],
             "truncated": truncated,
+            "matched": matched,
             "degraded": degraded or None,
             "reindexed": reindexed or None,
         }
@@ -346,6 +368,30 @@ class ForgeSearch:
                 for f in counts.files
             )
 
+        matched = "literal"
+        if (
+            total_chunks == 0
+            and substring_of(query) is None
+            and not query.startswith("fts5:")
+        ):
+            matched = "substring"
+            for root in selected:
+                try:
+                    counts = self._index_for(root).count_matches(
+                        f"sub:{query}",
+                        file_limit=MAX_COUNT_FILES,
+                        suffixes=DOC_SUFFIXES if doc_only else None,
+                    )
+                except QueryError, OSError:
+                    continue
+                total_chunks += counts.total_chunks
+                total_files += counts.total_files
+                truncated = truncated or counts.truncated
+                files.extend(
+                    {"project": root.label, "path": f.path, "matches": f.matches}
+                    for f in counts.files
+                )
+
         files.sort(key=lambda f: (-f["matches"], f["project"], f["path"]))
         if len(files) > MAX_COUNT_FILES:
             files = files[:MAX_COUNT_FILES]
@@ -356,6 +402,7 @@ class ForgeSearch:
             "total_files": total_files,
             "files": files,
             "truncated": truncated,
+            "matched": matched,
             "degraded": degraded or None,
             "reindexed": reindexed or None,
         }
@@ -410,7 +457,12 @@ class ForgeSearch:
             description=(
                 "Full-text search across indexed repositories. Returns ranked "
                 "excerpts with project, relative path, and line number. Use for "
-                "finding identifiers, call sites, filenames, and precedents."
+                "finding identifiers, call sites, filenames, and precedents. "
+                "Matching is by whole token, so 'hidden' will not match "
+                "`__hidden__` and 'validate' will not match `validate_token`; "
+                "prefix a query with 'sub:' to scan for a fragment instead. A "
+                "query with no literal match widens to a substring scan on its "
+                "own, and the `matched` field reports which pass answered."
             ),
         )
         async def search_code(
@@ -422,8 +474,9 @@ class ForgeSearch:
             """Search code and docs.
 
             Args:
-                query: Text to find. Matched literally; prefix with 'fts5:' for
-                    expression syntax.
+                query: Text to find. Matched as whole tokens; prefix with
+                    'sub:' to scan for a fragment, or 'fts5:' for expression
+                    syntax.
                 project: Restrict to one root by label. Omit to search all.
                 top_k: Maximum results (capped at 50).
             """
@@ -468,7 +521,8 @@ class ForgeSearch:
                 "capped in the same way and is far cheaper per result, because "
                 "it returns paths instead of text. Lexical and literal — it "
                 "does not use the semantic arm, which ranks by similarity and "
-                "has no complete match set to count."
+                "has no complete match set to count. Matching is by whole "
+                "token; prefix with 'sub:' to count fragment matches instead."
             ),
         )
         async def count_matches(
@@ -480,8 +534,9 @@ class ForgeSearch:
             """Count every match, returning paths rather than excerpts.
 
             Args:
-                query: Text to find. Matched literally; prefix with 'fts5:' for
-                    expression syntax.
+                query: Text to find. Matched as whole tokens; prefix with
+                    'sub:' to scan for a fragment, or 'fts5:' for expression
+                    syntax.
                 project: Restrict to one root by label. Omit to search all.
                 docs_only: Restrict to prose files (.md, .rst, .txt). Applies to
                     the totals, not merely the listed files.

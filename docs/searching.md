@@ -162,6 +162,36 @@ refreshed during the call.
 
 The same, restricted to prose: `.md`, `.markdown`, `.rst`, `.txt`.
 
+### Substring queries — `sub:`
+
+Matching is by whole token. That is what makes `__hidden__` exact rather than
+matching every occurrence of the word "hidden" — and it is the reason the
+reverse fails too: `grep hidden` finds `__hidden__`, and no query against a
+token index can, because the two are different tokens. `validate` will not
+find `validate_token` for the same reason.
+
+Prefix a query with `sub:` to scan for a fragment instead:
+
+```
+sub:hidden          → __hidden__, and the ordinary word
+sub:alidate_tok     → validate_token
+```
+
+It is a scan, not a second index. A trigram index would answer faster and cost
+a large multiple of the database to carry, and this is the exceptional query
+shape rather than the common one. Measured on a 707k-chunk index, a full count
+is ~145 ms and a page returns in single-digit milliseconds, because the limit
+stops the scan as soon as it has enough.
+
+The text after `sub:` is matched literally and case-insensitively, with no
+metacharacters — there is nothing to quote or escape.
+
+**A query with no literal match widens to a substring scan on its own.** Zero
+results is the one case where widening costs nothing, and without it a caller
+who typed a fragment cannot tell "no such token" from "no such text". Responses
+carry `matched`, which is `"literal"` or `"substring"`, because the two are not
+the same claim.
+
 ### `count_matches(query, project=None, docs_only=False)`
 
 Every match, as `total_chunks`, `total_files`, and a file roster carrying a

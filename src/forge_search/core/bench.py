@@ -157,7 +157,11 @@ def run_bench(
     if not queries:
         raise ValueError(
             "bench needs a query fixture; inventing queries here would "
-            "let the harness flatter whichever arm it was written to favour"
+            "let the harness flatter whichever arm it was written to favour.\n"
+            "  --fixture bench/apexyard.txt       (the bundled fixture)\n"
+            "  --query 'text::expected/path'      (repeatable, ad hoc)\n"
+            "Each entry pairs a query with the path it should find, because "
+            "recall cannot be measured without a known-correct answer."
         )
 
     results: dict[str, ModeResult] = {}

@@ -21,6 +21,7 @@ from pathlib import Path
 from .embedding import Embedder
 from .fusion import ArmWeights, fuse
 from .index import Hit, IndexStats, LexicalIndex, MatchCounts
+from .query import substring_of
 from .rerank import Reranker, rerank
 from .roots import Root
 from .semantic import SemanticIndex, vec_available
@@ -170,6 +171,14 @@ class HybridIndex:
         Asking explicitly for `semantic` when it is absent returns nothing,
         which is honest: the caller asked for an arm that is not there.
         """
+        # A substring query is lexical by construction: it is a scan for text
+        # the caller can already see. Embedding it would ask the semantic arm
+        # to rank a fragment by meaning, which is not what was requested, and
+        # fusing a scan's flat scores with similarity scores would invent a
+        # ranking neither arm computed.
+        if substring_of(query) is not None:
+            return self._lexical.search(query, limit=limit)
+
         # Reranking is orthogonal to which arms exist, so every path below
         # ends in _rerank(). Applying it only on the hybrid path would mean a
         # lexical-only install silently ignored `--rerank` — the exact shape
