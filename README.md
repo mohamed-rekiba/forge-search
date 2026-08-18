@@ -226,9 +226,9 @@ otherwise.
 
 Two notes on the fit:
 
-- **`--adapter apexyard` no longer exists.** It read a portfolio's
-  `apexyard.projects.yaml` to infer its projects; `--sub-projects` states them
-  instead. See [docs/decisions.md](docs/decisions.md).
+- **A portfolio's projects are stated, not inferred.** Earlier versions read a
+  portfolio's `apexyard.projects.yaml` to discover them; `--sub-projects`
+  names the directories instead. See [docs/decisions.md](docs/decisions.md).
 - **The session-start hook passes no `--root`.** It runs `apexyard-search
   doctor` and `apexyard-search reindex --incremental --if-stale=<seconds>` from
   inside the project, so both fall back to the working directory and announce

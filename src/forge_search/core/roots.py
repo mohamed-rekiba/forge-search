@@ -31,8 +31,8 @@ This replaced a layered discovery scheme, and the reasoning is worth keeping:
 
 `--sub-projects` answers the one question a root's own path genuinely cannot:
 that it holds several projects, and which directories those live under. That
-used to be answered by an adapter that read a portfolio's own config to infer
-the same structure — the one guess this module made anywhere. Stating it as a
+used to be answered by reading a portfolio's own config to infer the same
+structure — the one guess this module made anywhere. Stating it as a
 flag instead removes that exception rather than keeping it; see
 docs/decisions.md for the full reasoning and what it gives up.
 """

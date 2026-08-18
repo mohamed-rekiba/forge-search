@@ -1,8 +1,8 @@
 """`--sub-projects` — expanding a root into the checkouts nested inside it.
 
-This is the generic replacement for the retired ApexYard adapter: the caller
-states which directories under a root hold other projects, rather than a
-component reading a portfolio's own config files to infer the same thing.
+The caller states which directories under a root hold other projects, rather
+than a component reading a portfolio's own config files to infer the same
+thing, as a retired seam once did.
 `resolve_roots` is exercised directly here — the same seam the CLI's
 `--sub-projects` flag drives (see `cli._parse_sub_projects` for the
 comma-split, done once at the CLI boundary rather than in core).
