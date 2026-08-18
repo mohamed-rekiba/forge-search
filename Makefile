@@ -107,7 +107,7 @@ pre-commit:  ## Run all pre-commit hooks across the repo
 
 .PHONY: clean
 clean:  ## Remove build / cache artifacts
-	rm -rf dist build .ruff_cache .pytest_cache .smoke .venv-lexical .coverage* coverage.xml
+	rm -rf dist build .ruff_cache .pytest_cache .mypy_cache .smoke .venv-lexical .coverage* coverage.xml
 	find . \( -name "__pycache__" -o -name ".forge_search" \) -type d -prune -exec rm -rf {} +
 
 .PHONY: ci

@@ -28,7 +28,7 @@ dependencies = [
 # major this code ran against.
 semantic = [
     "numpy>=2.5.2,<3",
-    "onnxruntime>=1.28.0,<2",
+    "onnxruntime>=1.29.0,<2",
     "sqlite-vec>=0.1.9,<1",
     "tokenizers>=0.23.1,<1",
 ]
@@ -45,16 +45,12 @@ http = []
 
 [dependency-groups]
 dev = [
-    "mypy>=2.3.0",
-    # `tests/test_dependency_bounds.py` parses version specifiers with this.
-    # It arrives transitively via pytest, which is exactly the kind of
-    # accidental reliance that file exists to catch — so it is declared here
-    # rather than assumed. Test-only: nothing in `src/` imports it.
+    "mypy>=2.3.1",
     "packaging>=26.3",
     "pyright>=1.1.411",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
-    "ruff>=0.16.1",
+    "ruff>=0.16.3",
 ]
 
 [tool.coverage.run]
