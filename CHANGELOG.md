@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.0](https://github.com/mohamed-rekiba/forge-search/compare/v1.3.0...v1.4.0) (2026-08-18)
+
+
+### Features
+
+* read roots from the environment, including the apexyard pair ([#65](https://github.com/mohamed-rekiba/forge-search/issues/65)) ([c468c29](https://github.com/mohamed-rekiba/forge-search/commit/c468c29040f6cd29c18a4889a005dd700e21e69e))
+* single-source the version, drop the release re-lock, --version, one-Ctrl-C shutdown ([#66](https://github.com/mohamed-rekiba/forge-search/issues/66)) ([066f3e6](https://github.com/mohamed-rekiba/forge-search/commit/066f3e61b2397110ab0137e8ea9f191e2280f74b))
+
+
+### Documentation
+
+* stop naming --adapter, which has not existed since 1.0.0 ([#63](https://github.com/mohamed-rekiba/forge-search/issues/63)) ([a33390a](https://github.com/mohamed-rekiba/forge-search/commit/a33390a81ec4afd641b1bfb9c893b083a8a82ed3))
+
 ## [1.3.0](https://github.com/mohamed-rekiba/forge-search/compare/v1.2.0...v1.3.0) (2026-08-18)
 
 
