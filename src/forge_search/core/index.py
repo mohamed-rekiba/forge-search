@@ -17,6 +17,7 @@ staleness impossible to not notice.
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import time
@@ -515,24 +516,34 @@ class LexicalIndex:
 
         # A suffix filter has to reach the TOTALS, not just the roster.
         # Counting the whole index and then listing a filtered subset would
-        # restate the very bug this path exists to close, one field over. The
-        # predicate is parameterised rather than interpolated, so a suffix set
-        # can never become SQL.
-        where, params = "chunks MATCH ?", [expression]
-        if suffixes is not None:
-            clause = " OR ".join("lower(relpath) GLOB ?" for _ in suffixes)
-            where += f" AND ({clause})" if clause else " AND 0"
-            params += [f"*{s.lower()}" for s in suffixes]
+        # restate the very bug this path exists to close, one field over.
+        #
+        # The suffix set arrives as ONE bound parameter, a JSON array expanded
+        # by `json_each`, so both statements below are fixed strings. Building
+        # an N-term OR clause by interpolation would have been safe in fact --
+        # every value was still bound -- but it puts a caller-shaped value into
+        # the SQL text, which no reader (and no scanner) can verify at a
+        # glance. A static statement needs no such argument.
+        params = {
+            "expr": expression,
+            "suffixes": None if suffixes is None else json.dumps(sorted(suffixes)),
+        }
 
         try:
             total_chunks, total_files = self._conn.execute(
-                f"SELECT count(*), count(DISTINCT relpath) FROM chunks WHERE {where}",
+                "SELECT count(*), count(DISTINCT relpath) FROM chunks "
+                "WHERE chunks MATCH :expr AND (:suffixes IS NULL OR EXISTS ("
+                "SELECT 1 FROM json_each(:suffixes) "
+                "WHERE lower(relpath) GLOB '*' || value))",
                 params,
             ).fetchone()
             rows = self._conn.execute(
-                f"SELECT relpath, count(*) AS n FROM chunks WHERE {where} "
-                "GROUP BY relpath ORDER BY n DESC, relpath LIMIT ?",
-                [*params, file_limit],
+                "SELECT relpath, count(*) AS n FROM chunks "
+                "WHERE chunks MATCH :expr AND (:suffixes IS NULL OR EXISTS ("
+                "SELECT 1 FROM json_each(:suffixes) "
+                "WHERE lower(relpath) GLOB '*' || value)) "
+                "GROUP BY relpath ORDER BY n DESC, relpath LIMIT :file_limit",
+                {**params, "file_limit": file_limit},
             ).fetchall()
         except sqlite3.OperationalError as exc:
             raise QueryError(f"could not parse query {query!r}: {exc}") from exc
