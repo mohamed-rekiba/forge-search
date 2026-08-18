@@ -73,6 +73,12 @@ is indexed. A stated default can be checked against the tree the caller meant;
 that is the entire difference, and it is what the earlier reversal was really
 defending.
 
+`serve` is excluded and still refuses. A server's root is written once into an
+MCP client config, where naming it costs nothing, and a wrong one is not a
+wrong answer but a wrong answer for the whole session, to every caller,
+invisibly — which is the case this rule was really written for. The fallback is
+for one-shot commands run from inside a project.
+
 Explicit roots are untouched, and remain the recommendation.
 
 ## Indexes live in the tree

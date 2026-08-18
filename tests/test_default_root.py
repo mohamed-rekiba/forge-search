@@ -81,3 +81,17 @@ def test_an_explicit_root_is_never_overridden(
 
     assert "no --root given" not in captured.err
     assert "other" in captured.out
+
+
+def test_serve_still_refuses_a_missing_root(project: Path) -> None:
+    """The fallback is for one-shot commands, not for a long-lived server.
+
+    A server's root is written once into an MCP client config, where naming it
+    costs nothing. A wrong one is not a wrong answer — it is a wrong answer for
+    the whole session, to every caller, invisibly. That is the case the
+    "nothing is discovered" rule was really written for, and it is untouched.
+    """
+    with pytest.raises(SystemExit) as exc:
+        main(["serve"])
+
+    assert "--root" in str(exc.value)

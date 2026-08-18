@@ -232,7 +232,9 @@ Two notes on the fit:
 - **The session-start hook passes no `--root`.** It runs `apexyard-search
   doctor` and `apexyard-search reindex --incremental --if-stale=<seconds>` from
   inside the project, so both fall back to the working directory and announce
-  the path they chose.
+  the path they chose. `serve` is deliberately not part of that: a server's
+  root is named once in the config above, and a wrong one would be wrong for
+  the whole session rather than for one command.
 
 ## Indexes
 

@@ -108,6 +108,21 @@ def _explicit_roots(args: argparse.Namespace) -> list[Root]:
     but each named sub-projects directory is re-scanned every call, so a clone
     that appeared since startup is picked up.
     """
+    if not args.root and getattr(args, "strict_root", False):
+        # `serve` still refuses. The fallback below is for one-shot commands
+        # run from inside a project; a long-lived server is the opposite case.
+        # Its root is written once into an MCP client config, where naming it
+        # costs nothing, and a wrong one is not a wrong answer but a wrong
+        # answer for the whole session, to every caller, invisibly.
+        raise SystemExit(
+            "no --root given. forge-search does not guess which project a "
+            "server should host.\n"
+            "  --root /absolute/path/to/project\n"
+            "  --root myproject=/absolute/path        (labelled)\n"
+            "\nUse an absolute path. `${workspaceFolder}` is a VS Code "
+            "variable and is not expanded by every MCP client."
+        )
+
     if not args.root:
         # Fall back to the working directory, and SAY SO.
         #
@@ -681,7 +696,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Rerank results with a cross-encoder (needs `warm --reranker`)",
     )
-    serve.set_defaults(func=_cmd_serve)
+    serve.set_defaults(func=_cmd_serve, strict_root=True)
 
     index = sub.add_parser("index", help="Build or refresh indexes")
     _add_root_args(index)
