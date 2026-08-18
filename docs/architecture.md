@@ -14,7 +14,7 @@ flowchart LR
     end
 
     subgraph proc["forge-search (subprocess)"]
-        server["MCP server<br/>search_code · search_docs · reindex"]
+        server["MCP server<br/>search_code · search_docs · count_matches · reindex"]
         lex["Lexical arm<br/>SQLite FTS5"]
         sem["Semantic arm<br/>sqlite-vec + ONNX<br/><i>optional</i>"]
         server --> lex
@@ -121,7 +121,7 @@ sequenceDiagram
     C->>S: notifications/initialized
     C->>S: logging/setLevel
     C->>S: tools/list
-    S-->>C: search_code · search_docs · reindex
+    S-->>C: search_code · search_docs · count_matches · reindex
 
     Note over C,S: first tool call
     C->>S: tools/call search_code

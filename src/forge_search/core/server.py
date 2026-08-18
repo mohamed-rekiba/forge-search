@@ -105,6 +105,11 @@ MAX_TOP_K = 50
 #: thin result set is the whole truth.
 _FETCH_CEILING = 2000
 
+#: Ceiling on the file roster returned by `count_matches`. Far above `top_k`
+#: because a path costs a fraction of an excerpt -- the whole point of the
+#: counting path is that completeness is affordable when no text is returned.
+MAX_COUNT_FILES = 500
+
 
 @dataclass(slots=True)
 class ForgeSearch:
@@ -299,6 +304,62 @@ class ForgeSearch:
             "reindexed": reindexed or None,
         }
 
+    def _count(
+        self, query: str, *, project: str | None, doc_only: bool
+    ) -> dict[str, Any]:
+        """Aggregate every match across the selected roots.
+
+        The complement of `_search`: no excerpts, no ranking, no `top_k`. It
+        exists so "what are ALL the call sites" and "does this appear at all"
+        have an answer, which a capped ranked page structurally cannot give.
+        """
+        selected = self._resolve_selection(project)
+
+        total_chunks = 0
+        total_files = 0
+        files: list[dict[str, Any]] = []
+        degraded: list[str] = []
+        reindexed: list[str] = []
+        truncated = False
+
+        for root in selected:
+            index = self._index_for(root)
+            try:
+                if self._ensure_fresh(index):
+                    reindexed.append(root.label)
+                counts = index.count_matches(
+                    query,
+                    file_limit=MAX_COUNT_FILES,
+                    suffixes=DOC_SUFFIXES if doc_only else None,
+                )
+            except QueryError:
+                raise
+            except OSError as exc:
+                degraded.append(f"{root.label}: {exc}")
+                continue
+
+            total_chunks += counts.total_chunks
+            total_files += counts.total_files
+            truncated = truncated or counts.truncated
+            files.extend(
+                {"project": root.label, "path": f.path, "matches": f.matches}
+                for f in counts.files
+            )
+
+        files.sort(key=lambda f: (-f["matches"], f["project"], f["path"]))
+        if len(files) > MAX_COUNT_FILES:
+            files = files[:MAX_COUNT_FILES]
+            truncated = True
+
+        return {
+            "total_chunks": total_chunks,
+            "total_files": total_files,
+            "files": files,
+            "truncated": truncated,
+            "degraded": degraded or None,
+            "reindexed": reindexed or None,
+        }
+
     # -- MCP wiring --------------------------------------------------------
 
     def build(self) -> MCPServer:
@@ -393,6 +454,40 @@ class ForgeSearch:
             """
             await self._announce(ctx)
             return self._search(query, project=project, top_k=top_k, doc_only=True)
+
+        @mcp.tool(
+            name="count_matches",
+            title="Count matches",
+            description=(
+                "Every match for a query, aggregated as totals plus a file "
+                "roster with per-file counts — no excerpts. Use when you need "
+                "COMPLETENESS rather than the best hits: all call sites of a "
+                "symbol, the blast radius of a rename, or proof that something "
+                "appears nowhere (total_chunks == 0 on a fresh index). "
+                "search_code is capped and returns a ranked page; this is not "
+                "capped in the same way and is far cheaper per result, because "
+                "it returns paths instead of text. Lexical and literal — it "
+                "does not use the semantic arm, which ranks by similarity and "
+                "has no complete match set to count."
+            ),
+        )
+        async def count_matches(
+            ctx: Context,
+            query: str,
+            project: str | None = None,
+            docs_only: bool = False,
+        ) -> dict[str, Any]:
+            """Count every match, returning paths rather than excerpts.
+
+            Args:
+                query: Text to find. Matched literally; prefix with 'fts5:' for
+                    expression syntax.
+                project: Restrict to one root by label. Omit to search all.
+                docs_only: Restrict to prose files (.md, .rst, .txt). Applies to
+                    the totals, not merely the listed files.
+            """
+            await self._announce(ctx)
+            return self._count(query, project=project, doc_only=docs_only)
 
         @mcp.tool(
             name="reindex",

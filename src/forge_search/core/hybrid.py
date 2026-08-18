@@ -14,12 +14,13 @@ and not the other.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .embedding import Embedder
 from .fusion import ArmWeights, fuse
-from .index import Hit, IndexStats, LexicalIndex
+from .index import Hit, IndexStats, LexicalIndex, MatchCounts
 from .rerank import Reranker, rerank
 from .roots import Root
 from .semantic import SemanticIndex, vec_available
@@ -70,6 +71,26 @@ class HybridIndex:
     @property
     def has_semantic(self) -> bool:
         return self._semantic is not None
+
+    def count_matches(
+        self,
+        query: str,
+        *,
+        file_limit: int = 500,
+        suffixes: Collection[str] | None = None,
+    ) -> MatchCounts:
+        """Aggregate counts, from the lexical arm only.
+
+        Not a hybrid operation, and deliberately so. The semantic arm ranks by
+        similarity over a nearest-neighbour search: every document has some
+        score, so there is no set of "the matches" to count and no threshold
+        that would make one without inventing a cutoff. Counting is a question
+        only a literal index can answer honestly, so this delegates straight
+        through rather than fusing.
+        """
+        return self._lexical.count_matches(
+            query, file_limit=file_limit, suffixes=suffixes
+        )
 
     def close(self) -> None:
         if self._semantic is not None:

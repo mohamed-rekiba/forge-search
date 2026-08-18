@@ -162,6 +162,31 @@ refreshed during the call.
 
 The same, restricted to prose: `.md`, `.markdown`, `.rst`, `.txt`.
 
+### `count_matches(query, project=None, docs_only=False)`
+
+Every match, as `total_chunks`, `total_files`, and a file roster carrying a
+per-file count — **no excerpts**.
+
+`search_code` returns a ranked page and is capped, because excerpts are what
+cost tokens. That cap leaves two ordinary questions unanswerable, since a
+clipped page and a complete one look identical from outside:
+
+- *What are all the call sites of this symbol?* — the blast radius of a rename.
+- *Does this appear anywhere at all?* — `total_chunks == 0` on a fresh index is
+  usable evidence, where an empty ranked page never was.
+
+Completeness is affordable here precisely because nothing textual comes back: a
+path costs a fraction of an excerpt, so the full answer is typically cheaper
+than one page of the ranked one.
+
+`docs_only` restricts the **totals**, not merely the listed files.
+
+Lexical and literal — it does not consult the semantic arm, which ranks by
+similarity and therefore has no complete match set to count.
+
+An unparseable query raises rather than returning zero. That distinction is the
+whole basis for reading a zero as absence.
+
 ### `reindex(project=None, force=False)`
 
 Rarely needed — searches detect staleness themselves. Use `force` after

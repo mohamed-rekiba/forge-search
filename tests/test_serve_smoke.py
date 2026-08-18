@@ -115,7 +115,7 @@ def test_server_starts_and_serves_a_search(project):
 
         client.send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = {t["name"] for t in client.read()["result"]["tools"]}
-        assert names == {"search_code", "search_docs", "reindex"}
+        assert names == {"search_code", "search_docs", "count_matches", "reindex"}
 
         hits = client.call("search_code", query="tokens", top_k=5)["results"]
         assert any(h["path"] == "auth.md" for h in hits)

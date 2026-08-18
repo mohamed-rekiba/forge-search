@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -118,6 +118,30 @@ class Hit:
     line: int
     excerpt: str
     score: float
+
+
+@dataclass(frozen=True, slots=True)
+class FileMatch:
+    """How many times one file matched. No text, deliberately."""
+
+    path: str
+    matches: int
+
+
+@dataclass(frozen=True, slots=True)
+class MatchCounts:
+    """A complete answer to "where does this appear", priced in paths.
+
+    `total_chunks` and `total_files` are whole even when `files` is clipped,
+    because the aggregates are what make an answer checkable: a caller can see
+    that 400 matches exist across 30 files while holding only the first N
+    paths. `truncated` refers to the roster alone.
+    """
+
+    total_chunks: int
+    total_files: int
+    files: tuple[FileMatch, ...]
+    truncated: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -459,6 +483,67 @@ class LexicalIndex:
         return len(rows)
 
     # -- querying ----------------------------------------------------------
+
+    def count_matches(
+        self,
+        query: str,
+        *,
+        file_limit: int = 500,
+        suffixes: Collection[str] | None = None,
+    ) -> MatchCounts:
+        """Every match, aggregated -- the enumeration a ranked page cannot give.
+
+        `search` is capped, and rightly so: excerpts are the expensive part and
+        an unbounded page of them is the cost this tool exists to avoid. But a
+        cap makes two ordinary questions unanswerable -- "what are ALL the call
+        sites" and "does this appear anywhere at all" -- because a clipped page
+        and a complete one look alike from outside. Counting answers both
+        without returning a single line of text, so completeness costs less
+        than one page of excerpts rather than more.
+
+        Content matches only, which is deliberate: this is the shape a caller
+        compares against `grep -c` / `grep -rl`, and filename hits would make
+        the totals disagree with it. Lexical only, for the same reason -- a
+        vector search ranks by similarity and has no complete match set to
+        count.
+
+        Raises `QueryError` on an unparseable query. A zero count means
+        "searched, found nothing" and is usable as proof of absence; an error
+        means "did not search" and is not.
+        """
+        expression = to_fts5(query)
+
+        # A suffix filter has to reach the TOTALS, not just the roster.
+        # Counting the whole index and then listing a filtered subset would
+        # restate the very bug this path exists to close, one field over. The
+        # predicate is parameterised rather than interpolated, so a suffix set
+        # can never become SQL.
+        where, params = "chunks MATCH ?", [expression]
+        if suffixes is not None:
+            clause = " OR ".join("lower(relpath) GLOB ?" for _ in suffixes)
+            where += f" AND ({clause})" if clause else " AND 0"
+            params += [f"*{s.lower()}" for s in suffixes]
+
+        try:
+            total_chunks, total_files = self._conn.execute(
+                f"SELECT count(*), count(DISTINCT relpath) FROM chunks WHERE {where}",
+                params,
+            ).fetchone()
+            rows = self._conn.execute(
+                f"SELECT relpath, count(*) AS n FROM chunks WHERE {where} "
+                "GROUP BY relpath ORDER BY n DESC, relpath LIMIT ?",
+                [*params, file_limit],
+            ).fetchall()
+        except sqlite3.OperationalError as exc:
+            raise QueryError(f"could not parse query {query!r}: {exc}") from exc
+
+        files = tuple(FileMatch(path=relpath, matches=n) for relpath, n in rows)
+        return MatchCounts(
+            total_chunks=total_chunks,
+            total_files=total_files,
+            files=files,
+            truncated=len(files) < total_files,
+        )
 
     def search(self, query: str, *, limit: int = 10) -> list[Hit]:
         """Full-text search, ranked by BM25.

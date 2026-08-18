@@ -15,6 +15,7 @@ import pytest
 
 from forge_search.core.cache import index_path_for
 from forge_search.core.index import LexicalIndex
+from forge_search.core.query import QueryError
 from forge_search.core.roots import Root
 from forge_search.core.traversal import DEFAULT_EXCLUDES
 
@@ -430,4 +431,82 @@ class TestIdentifierTokenization:
 
         assert "partial.py" not in paths, "matched on the 'token' fragment alone"
         assert "other.py" in paths
+        index.close()
+
+
+class TestMatchCounts:
+    """Complete enumeration, without paying for excerpts.
+
+    A ranked page answers "show me the best hits". It cannot answer "what are
+    ALL the call sites" or "does this symbol appear anywhere", because it is
+    capped -- and the cap exists for a good reason, to bound token cost. The
+    counting path answers those two questions instead, returning aggregates
+    and paths rather than text, so completeness costs a fraction of what one
+    page of excerpts costs.
+    """
+
+    @pytest.fixture
+    def corpus(self, tmp_path: Path) -> Root:
+        src = tmp_path / "corpus"
+        (src / "pkg").mkdir(parents=True)
+        # 3 files, 6 occurrences total, deliberately uneven per file.
+        (src / "pkg" / "a.py").write_text("needle_token = 1\nneedle_token = 2\n")
+        (src / "pkg" / "b.py").write_text("x = needle_token\n")
+        (src / "notes.md").write_text(
+            "About needle_token.\nAnd needle_token again.\nOnce more: needle_token.\n"
+        )
+        (src / "unrelated.py").write_text("nothing to see\n")
+        return Root(label="corpus", path=src)
+
+    def test_counts_every_occurrence_not_a_ranked_page(self, corpus: Root) -> None:
+        index = LexicalIndex(corpus)
+        index.reindex()
+
+        counts = index.count_matches("needle_token")
+
+        assert counts.total_chunks == 6
+        assert counts.total_files == 3
+        assert {f.path for f in counts.files} == {"pkg/a.py", "pkg/b.py", "notes.md"}
+        assert dict((f.path, f.matches) for f in counts.files) == {
+            "pkg/a.py": 2,
+            "pkg/b.py": 1,
+            "notes.md": 3,
+        }
+        assert counts.truncated is False
+        index.close()
+
+    def test_absence_is_provable(self, corpus: Root) -> None:
+        """Zero on a fresh index is evidence; an empty ranked page never was."""
+        index = LexicalIndex(corpus)
+        index.reindex()
+
+        counts = index.count_matches("nothinglikethis")
+
+        assert counts.total_chunks == 0
+        assert counts.total_files == 0
+        assert counts.files == ()
+        assert counts.truncated is False
+        index.close()
+
+    def test_an_unparseable_query_still_raises(self, corpus: Root) -> None:
+        """Absence and 'did not search' must never look alike here either."""
+        index = LexicalIndex(corpus)
+        index.reindex()
+
+        with pytest.raises(QueryError):
+            index.count_matches("fts5:unbalanced (paren")
+        index.close()
+
+    def test_file_list_truncation_is_reported(self, corpus: Root) -> None:
+        """The file roster is bounded too -- and says so when it bites."""
+        index = LexicalIndex(corpus)
+        index.reindex()
+
+        counts = index.count_matches("needle_token", file_limit=2)
+
+        assert len(counts.files) == 2
+        assert counts.truncated is True
+        # The aggregates stay whole even when the roster is clipped.
+        assert counts.total_chunks == 6
+        assert counts.total_files == 3
         index.close()

@@ -94,8 +94,8 @@ Add to `.mcp.json` in your project, with an **absolute path**:
 }
 ```
 
-Tools then appear as `mcp__forge-search__search_code`, `…__search_docs`, and
-`…__reindex`.
+Tools then appear as `mcp__forge-search__search_code`, `…__search_docs`,
+`…__count_matches`, and `…__reindex`.
 
 To serve a whole portfolio of clones from one server, add `"--sub-projects",
 "workspace"` (or whatever directory holds them) and a `"--name"` of your
