@@ -20,13 +20,16 @@ query ran against real content.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import re
+import signal
 import sqlite3
 import sys
 import time
 from pathlib import Path
 
+from . import __version__
 from .core.bench import BenchQuery, run_bench
 from .core.cache import index_path_for
 from .core.embedding import HashingEmbedder, OnnxEmbedder
@@ -443,9 +446,47 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         summary=resolution.describe() if resolution else None,
         root_resolver=_reresolve,
     )
+
+    def _stop(_signum: int, _frame: object) -> None:
+        """Stop on the FIRST Ctrl-C, without unwinding.
+
+        Returning from the handler and letting the interpreter shut down does
+        not work here, and the reason is worth writing down.
+
+        The stdio transport reads stdin by iterating a file, which anyio runs
+        as a blocking `readline()` on a worker thread. Against a terminal that
+        thread sits in `read()`; nothing is ever going to write to it, and
+        cancellation cannot reach a thread blocked in a syscall. asyncio's own
+        SIGINT handling makes the first press cancel the main task rather than
+        raise, so that press appears to do nothing at all. The second raises
+        `KeyboardInterrupt`, and interpreter shutdown then joins the worker
+        threads, which are not daemons — so it hangs there until a third press
+        interrupts the join and prints a traceback out of `threading._shutdown`.
+
+        Three presses and a traceback, for a documented way to stop a server.
+
+        Nothing worth unwinding remains at this point, and deliberately nothing
+        is unwound. The index handles are **not** closed here: a signal handler
+        runs on the main thread at an arbitrary point, and closing SQLite while
+        a worker thread holds its mutex aborts the process from the C++ runtime
+        instead of exiting it. Leaving them is safe — read connections need no
+        clean close, and a write is either committed or rolled back on reopen.
+
+        So flush and leave. `os._exit` skips atexit handlers and buffer
+        flushing, which is exactly why the flushes are explicit.
+        """
+        print("interrupted", file=sys.stderr)
+        with contextlib.suppress(Exception):
+            sys.stdout.flush()
+            sys.stderr.flush()
+        os._exit(0)
+
+    previous = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, _stop)
     try:
         search.run(transport=args.transport)
     finally:
+        signal.signal(signal.SIGINT, previous)
         search.close()
     return 0
 
@@ -722,6 +763,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="forge-search",
         description="Local code and docs search over one or many repositories.",
+    )
+    # "Which build is this" is the first question when a result set looks
+    # wrong, when an MCP client and a shell disagree about what is installed,
+    # or when a bug report arrives against a versioned index schema. Until this
+    # existed the only answer was to go reading site-packages.
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"forge-search {__version__}",
+        help="Print the version and exit",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

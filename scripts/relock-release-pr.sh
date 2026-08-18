@@ -57,18 +57,18 @@ git checkout "$BRANCH" --quiet
 
 uv lock --quiet
 
-if git diff --quiet -- uv.lock; then
-    echo "relock: uv.lock already matches the bumped version, nothing to push"
-    exit 0
-fi
-
-echo "relock: uv.lock changed —"
-git diff --stat -- uv.lock | sed 's/^/  /'
-
-# Validate before pushing. Nothing downstream will: a release PR has no check
-# runs at all, because the GITHUB_TOKEN that opened it cannot trigger
-# `pull_request` workflows. So this is the only place the lockfile about to be
-# released gets verified.
+# Validate FIRST, and unconditionally. Nothing downstream will: a release PR
+# has no check runs at all, because the GITHUB_TOKEN that opened it cannot
+# trigger `pull_request` workflows. So this is the only place the lockfile
+# about to be released gets verified.
+#
+# It runs before the "did anything change" test on purpose. The version is now
+# dynamic — read from the package rather than written in pyproject.toml — so
+# uv records no version for this project and a release bump leaves uv.lock
+# untouched. Which is the point; but it also means the no-change path is now
+# the *normal* path, and leaving the check on the far side of an early exit
+# would have quietly retired the only verification the release lock ever gets,
+# as a side effect of a change that looked purely mechanical.
 #
 # What this proves is that the lock INSTALLS — artifacts resolve, sdists build,
 # the resolution holds for this interpreter. It cannot prove agreement with
@@ -79,6 +79,14 @@ uv sync --locked --all-extras --quiet || fail \
     "the lockfile this just produced does not install." \
     "Not pushing it — a release PR has no CI, so an unusable lock would reach" \
     "the tag unchallenged. Run \`uv sync --locked --all-extras\` to see why."
+
+if git diff --quiet -- uv.lock; then
+    echo "relock: uv.lock is already correct and installs cleanly, nothing to push"
+    exit 0
+fi
+
+echo "relock: uv.lock changed —"
+git diff --stat -- uv.lock | sed 's/^/  /'
 
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

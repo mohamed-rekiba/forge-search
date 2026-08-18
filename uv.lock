@@ -327,7 +327,6 @@ wheels = [
 
 [[package]]
 name = "forge-search"
-version = "1.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
@@ -359,7 +358,7 @@ requires-dist = [
     { name = "sqlite-vec", marker = "extra == 'semantic'", specifier = ">=0.1.9,<1" },
     { name = "tokenizers", marker = "extra == 'semantic'", specifier = ">=0.23.1,<1" },
 ]
-provides-extras = ["semantic", "http"]
+provides-extras = ["http", "semantic"]
 
 [package.metadata.requires-dev]
 dev = [

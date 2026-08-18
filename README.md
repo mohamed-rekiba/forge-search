@@ -65,6 +65,9 @@ wheels for cp314.
 ## Use
 
 ```bash
+# Which build is installed
+forge-search --version
+
 # One-shot search — the fastest way to check behaviour
 forge-search search "validate_token" --root /abs/path/to/project
 forge-search search "require-active-ticket" --root api=~/code/api --top-k 5
