@@ -510,3 +510,77 @@ class TestMatchCounts:
         assert counts.total_chunks == 6
         assert counts.total_files == 3
         index.close()
+
+
+class TestSubstringSearch:
+    """Fragments of an identifier, which whole-token matching cannot reach.
+
+    Making `_` a token character is what stopped `__hidden__` matching every
+    occurrence of the word "hidden". The same change took away the other
+    direction: `grep hidden` finds `__hidden__`, and a whole-token index never
+    will, because the two are simply different tokens. Searching `validate`
+    for `validate_token` fails the same way.
+
+    So substring matching is offered as its own thing rather than smuggled
+    into the ranked path: a `sub:` prefix asks for it, and a query that finds
+    nothing literally falls back to it and says so. Scanning is affordable
+    precisely because it runs on the paths where the fast index has already
+    failed.
+    """
+
+    @pytest.fixture
+    def corpus(self, tmp_path: Path) -> Root:
+        src = tmp_path / "sub"
+        src.mkdir()
+        (src / "models.py").write_text("__hidden__ = frozenset()\n")
+        (src / "auth.py").write_text("def validate_token():\n    pass\n")
+        (src / "prose.md").write_text("Lazy loading reintroduces hidden I/O.\n")
+        return Root(label="sub", path=src)
+
+    def test_a_fragment_finds_the_whole_identifier(self, corpus: Root) -> None:
+        index = LexicalIndex(corpus)
+        index.reindex()
+
+        paths = {h.path for h in index.search("sub:hidden", limit=10)}
+
+        assert paths == {"models.py", "prose.md"}, "grep -l hidden finds both"
+        index.close()
+
+    def test_a_mid_token_fragment_is_reachable(self, corpus: Root) -> None:
+        """`validate` is not a token in `validate_token`; it is a prefix of one."""
+        index = LexicalIndex(corpus)
+        index.reindex()
+
+        paths = {h.path for h in index.search("sub:alidate_tok", limit=10)}
+
+        assert paths == {"auth.py"}
+        index.close()
+
+    def test_the_literal_path_is_unchanged(self, corpus: Root) -> None:
+        """Without the prefix, exactness is preserved — that was the point."""
+        index = LexicalIndex(corpus)
+        index.reindex()
+
+        paths = {h.path for h in index.search("__hidden__", limit=10)}
+
+        assert paths == {"models.py"}
+        index.close()
+
+    def test_counting_supports_substring_too(self, corpus: Root) -> None:
+        """Enumeration is where a fragment search matters most."""
+        index = LexicalIndex(corpus)
+        index.reindex()
+
+        counts = index.count_matches("sub:hidden")
+
+        assert counts.total_files == 2
+        assert {f.path for f in counts.files} == {"models.py", "prose.md"}
+        index.close()
+
+    def test_an_empty_substring_query_is_refused(self, corpus: Root) -> None:
+        index = LexicalIndex(corpus)
+        index.reindex()
+
+        with pytest.raises(QueryError):
+            index.search("sub:", limit=10)
+        index.close()

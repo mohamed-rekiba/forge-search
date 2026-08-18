@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .cache import ensure_index_dir, index_path_for
-from .query import QueryError, to_fts5
+from .query import QueryError, substring_of, to_fts5
 from .roots import Root
 from .traversal import TraversalConfig, excerpt, walk
 
@@ -57,6 +57,11 @@ _PATH_MATCH_SCORE = 1000.0
 #: while missing the paths table entirely — and because the stamp matches, no
 #: later check would ever catch them. A bump is the only way past a bad stamp,
 #: which is itself an argument for making these guards blunt rather than clever.
+#: Rank for substring hits. They arrive from a scan in file order rather than
+#: from BM25, so they carry no relevance signal to fuse with — one flat score
+#: keeps that visible instead of implying a ranking the scan never computed.
+_SUBSTRING_SCORE = 0.0
+
 SCHEMA_VERSION = 9
 
 _SCHEMA = """
@@ -485,6 +490,67 @@ class LexicalIndex:
 
     # -- querying ----------------------------------------------------------
 
+    def _substring_hits(self, needle: str, limit: int) -> list[Hit]:
+        """Scan stored chunk text for `needle`, case-insensitively.
+
+        A scan, not a second index. A trigram index would answer this faster
+        and cost a large multiple of the database to carry — and this query
+        shape is the exception, not the common path. Measured on a 707k-chunk
+        index: a full count is ~145ms and a page returns in single-digit
+        milliseconds once matches start landing, because the LIMIT stops the
+        scan early. Paying that on a fragment search is a better trade than
+        paying disk on every search that never needed it.
+        """
+        rows = self._conn.execute(
+            "SELECT relpath, line, body FROM chunks "
+            "WHERE instr(lower(body), lower(:needle)) > 0 "
+            "ORDER BY relpath, line LIMIT :limit",
+            {"needle": needle, "limit": limit},
+        ).fetchall()
+        hits: list[Hit] = []
+        for relpath, line, body in rows:
+            start = body.lower().find(needle.lower())
+            hits.append(
+                Hit(
+                    project=self.root.label,
+                    path=relpath,
+                    line=line,
+                    excerpt=excerpt(body, max(start, 0), len(needle)),
+                    score=_SUBSTRING_SCORE,
+                )
+            )
+        return hits
+
+    def _substring_counts(
+        self, needle: str, file_limit: int, suffixes: Collection[str] | None
+    ) -> MatchCounts:
+        params = {
+            "needle": needle,
+            "suffixes": None if suffixes is None else json.dumps(sorted(suffixes)),
+        }
+        where = (
+            "instr(lower(body), lower(:needle)) > 0 "
+            "AND (:suffixes IS NULL OR EXISTS ("
+            "SELECT 1 FROM json_each(:suffixes) "
+            "WHERE lower(relpath) GLOB '*' || value))"
+        )
+        total_chunks, total_files = self._conn.execute(
+            f"SELECT count(*), count(DISTINCT relpath) FROM chunks WHERE {where}",  # noqa: S608
+            params,
+        ).fetchone()
+        rows = self._conn.execute(
+            f"SELECT relpath, count(*) AS n FROM chunks WHERE {where} "  # noqa: S608
+            "GROUP BY relpath ORDER BY n DESC, relpath LIMIT :file_limit",
+            {**params, "file_limit": file_limit},
+        ).fetchall()
+        files = tuple(FileMatch(path=r, matches=n) for r, n in rows)
+        return MatchCounts(
+            total_chunks=total_chunks,
+            total_files=total_files,
+            files=files,
+            truncated=len(files) < total_files,
+        )
+
     def count_matches(
         self,
         query: str,
@@ -512,6 +578,10 @@ class LexicalIndex:
         "searched, found nothing" and is usable as proof of absence; an error
         means "did not search" and is not.
         """
+        needle = substring_of(query)
+        if needle is not None:
+            return self._substring_counts(needle, file_limit, suffixes)
+
         expression = to_fts5(query)
 
         # A suffix filter has to reach the TOTALS, not just the roster.
@@ -569,6 +639,10 @@ class LexicalIndex:
         exact silent-wrong-answer failure this project exists to prevent, and
         an earlier version of this method did precisely that.
         """
+        needle = substring_of(query)
+        if needle is not None:
+            return self._substring_hits(needle, limit)
+
         expression = to_fts5(query)
         try:
             path_matches = self._path_matches(expression, limit)

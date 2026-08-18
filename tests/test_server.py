@@ -506,3 +506,53 @@ class TestCountMatchesTool:
         mcp = counted.build()
         names = {t.name for t in asyncio.run(mcp.list_tools())}
         assert "count_matches" in names
+
+
+class TestSubstringFallback:
+    """A query that finds nothing literally widens to a substring scan.
+
+    The `sub:` prefix is the control, but it only helps a caller who already
+    knows the index matches whole tokens. Someone searching `validate_tok`
+    gets zero results and no reason why — the index cannot say "there are 40
+    of these, one token over". Zero is the one case where widening costs
+    nothing, so it widens, and the response says which pass answered.
+    """
+
+    @pytest.fixture
+    def fragments(self, tmp_path: Path):
+        r = tmp_path / "frag"
+        r.mkdir()
+        (r / "auth.py").write_text("def validate_token():\n    pass\n")
+        (r / "models.py").write_text("__hidden__ = frozenset()\n")
+        fs = ForgeSearch(roots=[Root(label="frag", path=r)])
+        yield fs
+        fs.close()
+
+    def test_a_fragment_that_matches_no_token_still_finds_it(
+        self, fragments: ForgeSearch
+    ) -> None:
+        result = fragments._search("alidate_tok", project=None, top_k=10, doc_only=False)
+
+        assert [r["path"] for r in result["results"]] == ["auth.py"]
+        assert result["matched"] == "substring"
+
+    def test_a_literal_hit_never_triggers_the_scan(self, fragments: ForgeSearch) -> None:
+        """Exactness is not traded away — the widening is only for zero."""
+        result = fragments._search("__hidden__", project=None, top_k=10, doc_only=False)
+
+        assert [r["path"] for r in result["results"]] == ["models.py"]
+        assert result["matched"] == "literal"
+
+    def test_a_genuine_absence_stays_absent(self, fragments: ForgeSearch) -> None:
+        result = fragments._search(
+            "nothinglikethis", project=None, top_k=10, doc_only=False
+        )
+
+        assert result["results"] == []
+        assert result["matched"] == "substring"
+
+    def test_counting_widens_too(self, fragments: ForgeSearch) -> None:
+        result = fragments._count("alidate_tok", project=None, doc_only=False)
+
+        assert result["total_files"] == 1
+        assert result["matched"] == "substring"
