@@ -39,8 +39,15 @@ __all__ = ["QueryError", "to_fts5", "RAW_PREFIX"]
 RAW_PREFIX = "fts5:"
 
 # A "bare word" for our purposes: letters, digits, underscore. Everything else
-# is a separator to FTS5's unicode61 tokenizer, so anything containing other
-# characters must be phrase-quoted to survive parsing.
+# is a separator to the tokenizer, so anything containing other characters
+# must be phrase-quoted to survive parsing.
+#
+# Underscore belongs on this list only because `core.index` configures the
+# tokenizer with `tokenchars '_'`. Stock unicode61 treats '_' as a separator,
+# which silently shredded every dunder and snake_case identifier into its
+# fragments. The two settings must stay in agreement: widening this pattern
+# without widening the tokenizer produces queries that cannot match what was
+# indexed.
 _BARE = re.compile(r"^\w+$", re.UNICODE)
 
 
