@@ -109,14 +109,27 @@ def _explicit_roots(args: argparse.Namespace) -> list[Root]:
     that appeared since startup is picked up.
     """
     if not args.root:
-        raise SystemExit(
-            "no --root given. forge-search does not guess which project you "
-            "mean.\n"
-            "  --root /absolute/path/to/project\n"
-            "  --root myproject=/absolute/path        (labelled)\n"
-            "\nUse an absolute path. `${workspaceFolder}` is a VS Code "
-            "variable and is not expanded by every MCP client."
+        # Fall back to the working directory, and SAY SO.
+        #
+        # The recorded objection to inferring a root is that a wrong guess is
+        # *silent*: the wrong tree gets indexed and every later search returns
+        # plausible results from somewhere else, with nothing to look at. That
+        # objection is about the silence, not about the fallback -- so the
+        # fallback names the absolute path it resolved, on stderr, every time.
+        # A stated default can be checked against the tree the caller meant;
+        # a silent one cannot, and that is the whole of the difference.
+        #
+        # Hard-failing here instead is not free. Callers that run
+        # `doctor` / `reindex` unattended from inside a project -- shell hooks,
+        # session-start probes -- pass no `--root` at all, and read the failure
+        # as "search is unavailable" rather than as "you forgot a flag".
+        cwd = Path.cwd().resolve()
+        print(
+            f"no --root given; using the working directory: {cwd}\n"
+            "  pass --root /absolute/path to search a different project.",
+            file=sys.stderr,
         )
+        args.root = [str(cwd)]
 
     explicit: list[Root] = []
     for raw in args.root:

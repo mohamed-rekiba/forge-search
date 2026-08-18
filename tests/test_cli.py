@@ -38,11 +38,26 @@ def test_a_genuinely_missing_directory_still_says_so(tmp_path):
     assert "unexpanded" not in str(exc.value)
 
 
-def test_missing_root_lists_the_correct_forms():
-    # Nothing is discovered, so the failure has to teach the fix.
-    with pytest.raises(SystemExit) as exc:
-        main(["serve"])
-    assert "--root" in str(exc.value)
+def test_missing_root_announces_the_working_directory(tmp_path, monkeypatch, capsys):
+    # Was: a hard failure, on the reasoning that nothing is discovered.
+    #
+    # The reasoning held against a *silent* guess -- the wrong tree indexed,
+    # every later search plausible and wrong, nothing to look at. It does not
+    # hold against a stated one, and the hard failure had its own cost:
+    # unattended callers running `doctor` or `reindex` from inside a project
+    # pass no --root and read the failure as "search is unavailable".
+    #
+    # So the fallback stays, and stays loud. What this test pins is the
+    # loudness -- the absolute path, on stderr, checkable against the tree the
+    # caller meant.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "f.md").write_text("hello\n")
+
+    assert main(["index"]) == 0
+
+    err = capsys.readouterr().err
+    assert "no --root given" in err
+    assert str(tmp_path.resolve()) in err
 
 
 def test_a_real_directory_is_accepted(tmp_path):
