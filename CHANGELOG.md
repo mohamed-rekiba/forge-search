@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/mohamed-rekiba/forge-search/compare/v1.0.1...v1.1.0) (2026-08-18)
+
+
+### Features
+
+* count_matches — complete enumeration, priced in paths ([#57](https://github.com/mohamed-rekiba/forge-search/issues/57)) ([aa162ea](https://github.com/mohamed-rekiba/forge-search/commit/aa162ea1c1b1a744e8ed515f9ca4f8e8ca2bf462))
+
 ## [1.0.1](https://github.com/mohamed-rekiba/forge-search/compare/v1.0.0...v1.0.1) (2026-08-18)
 
 
